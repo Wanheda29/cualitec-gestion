@@ -1,16 +1,25 @@
 import { emptyState, normalizeState, orderStatuses, availableQuantity, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, monthlySummary } from "./domain.js";
+import { isCloudConfigured, signIn, signOut, getSession, readCloud, writeCloud } from "./cloud.js";
 
 const KEY = "cualitec-gestion-v1";
 let state;
 try { state = normalizeState(JSON.parse(localStorage.getItem(KEY)) || emptyState); }
 catch { state = structuredClone(emptyState); }
 let view = "dashboard";
+let session = null, cloudRevision = 0, cloudEnabled = false, cloudPending = null;
+let saveQueue = Promise.resolve();
 const app = document.querySelector("#app");
 const money = value => new Intl.NumberFormat("es-UY", { style: "currency", currency: "UYU", maximumFractionDigits: 0 }).format(Number(value || 0));
-const date = () => new Date().toISOString().slice(0, 10);
+const date = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
 const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
-const persist = next => { state = next; localStorage.setItem(KEY, JSON.stringify(state)); render(); };
+const persist = next => {
+  state = next; localStorage.setItem(KEY, JSON.stringify(state)); render();
+  if (cloudEnabled) {
+    saveQueue = saveQueue.then(async () => { cloudRevision = await writeCloud(state, cloudRevision); })
+      .catch(error => { cloudEnabled = false; toast(`No se sincronizó: ${error.message}. Descargá un respaldo y revisá la cuenta.`); render(); });
+  }
+};
 const toast = message => { const target = document.querySelector("#toast"); target.textContent = message; target.classList.add("show"); clearTimeout(toast.timer); toast.timer = setTimeout(() => target.classList.remove("show"), 4000); };
 const option = (value, label, selected = false) => `<option value="${esc(value)}" ${selected ? "selected" : ""}>${esc(label)}</option>`;
 const productOptions = selected => state.products.map(item => option(item.id, `${item.name}${item.variant ? ` · ${item.variant}` : ""}`, item.id === selected)).join("");
@@ -59,7 +68,26 @@ function sales() {
   return `<div class="stats"><article><span>Facturación del mes</span><strong>${money(summary.revenue)}</strong></article><article><span>Costo de mercadería</span><strong>${money(summary.cost)}</strong></article><article><span>Ganancia bruta</span><strong>${money(summary.revenue - summary.cost)}</strong></article></div>${section("Ventas realizadas", state.sales.length ? rows(["Fecha", "Cliente", "Canal", "Productos", "Total", "Ganancia bruta"], [...state.sales].reverse().map(item => `<tr><td>${esc(item.date)}</td><td>${esc(item.customerName)}</td><td>${esc(item.channel)}</td><td>${item.lines.map(line => `${esc(line.productName)} × ${line.quantity}`).join("<br>")}</td><td>${money(item.total)}</td><td>${money(item.total - item.lines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0))}</td></tr>`).join("")) : empty("Al entregar un pedido, la venta se registra automáticamente."))}`;
 }
 
-function dataView() { return `<div class="grid two">${section("Respaldo", `<p>Descargá una copia de tus datos o restaurá un respaldo de Cualitec.</p><div class="form-actions"><button id="export" class="primary">Descargar respaldo</button><label class="file-button">Importar respaldo<input id="import" type="file" accept="application/json,.json" hidden></label></div>`)}${section("Almacenamiento", `<p>Esta primera versión guarda los datos en este navegador. Para trabajar entre dispositivos se conectará a un proyecto de Supabase exclusivo de Cualitec.</p><p class="muted">Los datos de Dulce Gestión no se importan ni se comparten.</p>`)}</div>`; }
+function dataView() {
+  let account;
+  if (!isCloudConfigured()) account = `<p>La nube de Cualitec todavía no está configurada. Los datos se guardan en este navegador.</p>`;
+  else if (!session) account = `<p>Iniciá sesión para sincronizar datos entre dispositivos.</p><form id="login-form" class="form-grid"><label>Correo electrónico<input name="email" type="email" autocomplete="username" required></label><label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label><div class="form-actions"><button class="primary">Ingresar</button></div></form>`;
+  else account = `<p>Cuenta: <strong>${esc(session.user.email)}</strong></p><p>${cloudEnabled ? "Sincronización activa" : cloudPending ? "Los datos locales difieren de los de la nube. Descargá un respaldo antes de cargar la versión remota." : "Datos locales pendientes de subir a la nube."}</p><div class="form-actions">${cloudPending ? `<button id="load-cloud" class="secondary">Cargar datos de la nube</button>` : !cloudEnabled ? `<button id="upload-local" class="primary">Subir datos locales</button>` : ""}<button id="logout" class="secondary">Cerrar sesión</button></div>`;
+  return `<div class="grid two">${section("Respaldo", `<p>Descargá una copia de tus datos o restaurá un respaldo de Cualitec.</p><div class="form-actions"><button id="export" class="primary">Descargar respaldo</button><label class="file-button">Importar respaldo<input id="import" type="file" accept="application/json,.json" hidden></label></div>`)}${section("Cuenta y almacenamiento", account)}</div>`;
+}
+
+async function connectCloud() {
+  session = await getSession();
+  if (!session) { cloudEnabled = false; cloudPending = null; render(); return; }
+  const remote = await readCloud();
+  cloudRevision = Number(remote?.revision || 0);
+  if (remote && JSON.stringify(normalizeState(remote.data)) !== JSON.stringify(state)) {
+    cloudPending = normalizeState(remote.data); cloudEnabled = false;
+  } else if (!remote && Object.values(state).some(items => items.length)) {
+    cloudPending = null; cloudEnabled = false;
+  } else { cloudPending = null; cloudEnabled = true; }
+  render();
+}
 
 function render() {
   const titles = { dashboard: "Resumen", products: "Productos", purchases: "Compras", orders: "Pedidos", customers: "Clientes", sales: "Ventas", data: "Datos y respaldo" };
@@ -91,9 +119,21 @@ document.addEventListener("click", event => {
     const blob = new Blob([JSON.stringify({ application: "Cualitec Gestión", version: 1, exportedAt: new Date().toISOString(), data: state }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob), link = document.createElement("a"); link.href = url; link.download = `cualitec-respaldo-${date()}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  if (target.id === "logout") signOut().then(() => { session = null; cloudEnabled = false; cloudPending = null; render(); }).catch(error => toast(error.message));
+  if (target.id === "load-cloud" && cloudPending && confirm("Los datos locales se reemplazarán por la versión de Supabase. Descargá un respaldo antes de continuar. ¿Cargar?")) {
+    state = cloudPending; localStorage.setItem(KEY, JSON.stringify(state)); cloudPending = null; cloudEnabled = true; render();
+  }
+  if (target.id === "upload-local") writeCloud(state, cloudRevision).then(revision => { cloudRevision = revision; cloudEnabled = true; render(); toast("Datos subidos a Supabase."); }).catch(error => toast(error.message));
 });
 
-document.addEventListener("submit", event => {
+document.addEventListener("submit", async event => {
+  if (event.target.id === "login-form") {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.target));
+    try { await signIn(data.email, data.password); await connectCloud(); toast("Sesión iniciada."); }
+    catch (error) { toast(error.message); }
+    return;
+  }
   const form = event.target; if (!["product-form", "purchase-form", "adjust-form", "order-form"].includes(form.id)) return;
   event.preventDefault(); const data = Object.fromEntries(new FormData(form));
   try {
@@ -130,4 +170,5 @@ document.addEventListener("change", async event => {
   }
 });
 render();
+connectCloud().catch(error => toast(`No se pudo consultar Supabase: ${error.message}`));
 

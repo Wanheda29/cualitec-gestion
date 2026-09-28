@@ -17,7 +17,7 @@ Requiere Node.js 20 o posterior. Ejecutar `npm run serve` y abrir `http://localh
 
 ## Estado de la sincronización
 
-La versión local guarda datos en `localStorage` de este navegador. Todavía no hay conexión a Supabase: falta crear un proyecto nuevo para Cualitec, ejecutar [`supabase/schema.sql`](supabase/schema.sql) y configurar sus claves públicas. **No cargar datos reales para uso compartido entre dispositivos hasta conectar y verificar esa base.**
+La aplicación guarda una copia local en `localStorage`. El código de sincronización está preparado, pero falta crear un proyecto nuevo para Cualitec, ejecutar [`supabase/schema.sql`](supabase/schema.sql), crear una cuenta de acceso en Supabase Auth y configurar `cloud-config.js` con la URL y la clave **publicable**. **No cargar datos reales para uso compartido entre dispositivos hasta conectar y verificar esa base.**
 
 No se importa ni se conecta a la base de Dulce Gestión.
 
