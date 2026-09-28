@@ -17,7 +17,7 @@ Requiere Node.js 20 o posterior. Ejecutar `npm run serve` y abrir `http://localh
 
 ## Sincronización
 
-La aplicación guarda una copia local en `localStorage` y se conecta al proyecto Supabase exclusivo de Cualitec configurado en `cloud-config.js`. El esquema de [`supabase/schema.sql`](supabase/schema.sql) ya fue aplicado. Se envió una invitación de Supabase Auth a la cuenta administradora. Al abrir el enlace del correo, entrar en **Datos y respaldo** y guardar una contraseña nueva. Después, el inicio de sesión permite sincronizar entre dispositivos. La sincronización aún requiere una prueba con la cuenta activada.
+La aplicación guarda una copia local en `localStorage` y se conecta al proyecto Supabase exclusivo de Cualitec configurado en `cloud-config.js`. El esquema de [`supabase/schema.sql`](supabase/schema.sql) ya fue aplicado. La cuenta administradora está activada. En **Datos y respaldo**, el botón **Probar sincronización** comprueba que Supabase guarde y devuelva el estado actual sin crear registros de ejemplo. La sincronización entre dispositivos usa la misma cuenta; si hay datos distintos, la aplicación pide elegir qué versión conservar.
 
 No se importa ni se conecta a la base de Dulce Gestión.
 

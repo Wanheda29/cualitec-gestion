@@ -7,12 +7,14 @@ try { state = normalizeState(JSON.parse(localStorage.getItem(KEY)) || emptyState
 catch { state = structuredClone(emptyState); }
 let view = "dashboard";
 let session = null, cloudRevision = 0, cloudEnabled = false, cloudPending = null;
+let cloudCheck = "";
 let saveQueue = Promise.resolve();
 const app = document.querySelector("#app");
 const money = value => new Intl.NumberFormat("es-UY", { style: "currency", currency: "UYU", maximumFractionDigits: 0 }).format(Number(value || 0));
 const date = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
 const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+const canonical = value => JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
 const persist = next => {
   state = next; localStorage.setItem(KEY, JSON.stringify(state)); render();
   if (cloudEnabled) {
@@ -72,7 +74,7 @@ function dataView() {
   let account;
   if (!isCloudConfigured()) account = `<p>La nube de Cualitec todavía no está configurada. Los datos se guardan en este navegador.</p>`;
   else if (!session) account = `<p>Iniciá sesión para sincronizar datos entre dispositivos.</p><form id="login-form" class="form-grid"><label>Correo electrónico<input name="email" type="email" autocomplete="username" required></label><label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label><div class="form-actions"><button class="primary">Ingresar</button></div></form>`;
-  else account = `<p>Cuenta: <strong>${esc(session.user.email)}</strong></p><p>${cloudEnabled ? "Sincronización activa" : cloudPending ? "Los datos locales difieren de los de la nube. Descargá un respaldo antes de cargar la versión remota." : "Datos locales pendientes de subir a la nube."}</p><div class="form-actions">${cloudPending ? `<button id="load-cloud" class="secondary">Cargar datos de la nube</button>` : !cloudEnabled ? `<button id="upload-local" class="primary">Subir datos locales</button>` : ""}<button id="logout" class="secondary">Cerrar sesión</button></div><form id="password-form" class="form-grid"><label>Nueva contraseña<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><label>Repetir contraseña<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label><div class="form-actions"><button class="secondary">Guardar contraseña</button></div></form>`;
+  else account = `<p>Cuenta: <strong>${esc(session.user.email)}</strong></p><p>${cloudEnabled ? "Sincronización activa" : cloudPending ? "Los datos locales difieren de los de la nube. Descargá un respaldo antes de cargar la versión remota." : "Datos locales pendientes de subir a la nube."}</p><div class="form-actions">${cloudPending ? `<button id="load-cloud" class="secondary">Cargar datos de la nube</button>` : !cloudEnabled ? `<button id="upload-local" class="primary">Subir datos locales</button>` : `<button id="check-cloud" class="secondary">Probar sincronización</button>`}<button id="logout" class="secondary">Cerrar sesión</button></div>${cloudCheck ? `<p>${esc(cloudCheck)}</p>` : ""}<form id="password-form" class="form-grid"><label>Nueva contraseña<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><label>Repetir contraseña<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label><div class="form-actions"><button class="secondary">Guardar contraseña</button></div></form>`;
   return `<div class="grid two">${section("Respaldo", `<p>Descargá una copia de tus datos o restaurá un respaldo de Cualitec.</p><div class="form-actions"><button id="export" class="primary">Descargar respaldo</button><label class="file-button">Importar respaldo<input id="import" type="file" accept="application/json,.json" hidden></label></div>`)}${section("Cuenta y almacenamiento", account)}</div>`;
 }
 
@@ -81,7 +83,7 @@ async function connectCloud() {
   if (!session) { cloudEnabled = false; cloudPending = null; render(); return; }
   const remote = await readCloud();
   cloudRevision = Number(remote?.revision || 0);
-  if (remote && JSON.stringify(normalizeState(remote.data)) !== JSON.stringify(state)) {
+  if (remote && canonical(normalizeState(remote.data)) !== canonical(state)) {
     cloudPending = normalizeState(remote.data); cloudEnabled = false;
   } else if (!remote && Object.values(state).some(items => items.length)) {
     cloudPending = null; cloudEnabled = false;
@@ -124,6 +126,17 @@ document.addEventListener("click", event => {
     state = cloudPending; localStorage.setItem(KEY, JSON.stringify(state)); cloudPending = null; cloudEnabled = true; render();
   }
   if (target.id === "upload-local") writeCloud(state, cloudRevision).then(revision => { cloudRevision = revision; cloudEnabled = true; render(); toast("Datos subidos a Supabase."); }).catch(error => toast(error.message));
+  if (target.id === "check-cloud") {
+    target.disabled = true;
+    saveQueue = saveQueue.then(async () => {
+      const snapshot = structuredClone(state);
+      cloudRevision = await writeCloud(snapshot, cloudRevision);
+      const saved = await readCloud();
+      if (Number(saved?.revision) !== cloudRevision || canonical(normalizeState(saved.data)) !== canonical(snapshot)) throw new Error("Los datos leídos no coinciden con los guardados.");
+      cloudCheck = "Prueba correcta: Supabase guardó y devolvió los datos actuales.";
+      render();
+    }).catch(error => { cloudCheck = `No se pudo verificar: ${error.message}`; cloudEnabled = false; render(); });
+  }
 });
 
 document.addEventListener("submit", async event => {
