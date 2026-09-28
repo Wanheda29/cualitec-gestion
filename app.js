@@ -1,5 +1,5 @@
 import { emptyState, normalizeState, orderStatuses, availableQuantity, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, monthlySummary } from "./domain.js";
-import { isCloudConfigured, signIn, signOut, getSession, readCloud, writeCloud } from "./cloud.js";
+import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readCloud, writeCloud } from "./cloud.js";
 
 const KEY = "cualitec-gestion-v1";
 let state;
@@ -72,7 +72,7 @@ function dataView() {
   let account;
   if (!isCloudConfigured()) account = `<p>La nube de Cualitec todavía no está configurada. Los datos se guardan en este navegador.</p>`;
   else if (!session) account = `<p>Iniciá sesión para sincronizar datos entre dispositivos.</p><form id="login-form" class="form-grid"><label>Correo electrónico<input name="email" type="email" autocomplete="username" required></label><label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label><div class="form-actions"><button class="primary">Ingresar</button></div></form>`;
-  else account = `<p>Cuenta: <strong>${esc(session.user.email)}</strong></p><p>${cloudEnabled ? "Sincronización activa" : cloudPending ? "Los datos locales difieren de los de la nube. Descargá un respaldo antes de cargar la versión remota." : "Datos locales pendientes de subir a la nube."}</p><div class="form-actions">${cloudPending ? `<button id="load-cloud" class="secondary">Cargar datos de la nube</button>` : !cloudEnabled ? `<button id="upload-local" class="primary">Subir datos locales</button>` : ""}<button id="logout" class="secondary">Cerrar sesión</button></div>`;
+  else account = `<p>Cuenta: <strong>${esc(session.user.email)}</strong></p><p>${cloudEnabled ? "Sincronización activa" : cloudPending ? "Los datos locales difieren de los de la nube. Descargá un respaldo antes de cargar la versión remota." : "Datos locales pendientes de subir a la nube."}</p><div class="form-actions">${cloudPending ? `<button id="load-cloud" class="secondary">Cargar datos de la nube</button>` : !cloudEnabled ? `<button id="upload-local" class="primary">Subir datos locales</button>` : ""}<button id="logout" class="secondary">Cerrar sesión</button></div><form id="password-form" class="form-grid"><label>Nueva contraseña<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><label>Repetir contraseña<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label><div class="form-actions"><button class="secondary">Guardar contraseña</button></div></form>`;
   return `<div class="grid two">${section("Respaldo", `<p>Descargá una copia de tus datos o restaurá un respaldo de Cualitec.</p><div class="form-actions"><button id="export" class="primary">Descargar respaldo</button><label class="file-button">Importar respaldo<input id="import" type="file" accept="application/json,.json" hidden></label></div>`)}${section("Cuenta y almacenamiento", account)}</div>`;
 }
 
@@ -127,6 +127,14 @@ document.addEventListener("click", event => {
 });
 
 document.addEventListener("submit", async event => {
+  if (event.target.id === "password-form") {
+    event.preventDefault();
+    const form = event.target, data = Object.fromEntries(new FormData(form));
+    if (data.password !== data.confirmPassword) { toast("Las contraseñas no coinciden."); return; }
+    try { await updatePassword(data.password); form.reset(); toast("Contraseña guardada. Ya podés ingresar desde otros dispositivos."); }
+    catch (error) { toast(error.message); }
+    return;
+  }
   if (event.target.id === "login-form") {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.target));

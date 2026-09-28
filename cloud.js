@@ -25,6 +25,10 @@ export async function signOut() {
   const { error } = await (await client()).auth.signOut();
   if (error) throw new Error(error.message);
 }
+export async function updatePassword(password) {
+  const { error } = await (await client()).auth.updateUser({ password });
+  if (error) throw new Error(error.message);
+}
 export async function getSession() {
   if (!isCloudConfigured()) return null;
   const { data, error } = await (await client()).auth.getSession();

@@ -1,6 +1,6 @@
 # Cualitec Gestión
 
-Panel interno para un emprendimiento que vende tecnología por Instagram, WhatsApp y Facebook. Adaptado conceptualmente de [Dulce Gestión](https://github.com/Wanheda29/dulce-gestion), con un proyecto y datos independientes.
+Panel interno para un emprendimiento que vende tecnología por Instagram, WhatsApp y Facebook. Adaptado conceptualmente de [Dulce Gestión](https://github.com/Wanheda29/dulce-gestion), con un proyecto y datos independientes. Abrir el [panel publicado](https://wanheda29.github.io/cualitec-gestion/).
 
 ## Funciones actuales
 
@@ -17,7 +17,7 @@ Requiere Node.js 20 o posterior. Ejecutar `npm run serve` y abrir `http://localh
 
 ## Sincronización
 
-La aplicación guarda una copia local en `localStorage` y se conecta al proyecto Supabase exclusivo de Cualitec configurado en `cloud-config.js`. El esquema de [`supabase/schema.sql`](supabase/schema.sql) ya fue aplicado. Falta crear una cuenta de acceso en Supabase Auth y verificar el inicio de sesión y la sincronización entre dispositivos. **No cargar datos reales para uso compartido entre dispositivos hasta completar esa verificación.**
+La aplicación guarda una copia local en `localStorage` y se conecta al proyecto Supabase exclusivo de Cualitec configurado en `cloud-config.js`. El esquema de [`supabase/schema.sql`](supabase/schema.sql) ya fue aplicado. Se envió una invitación de Supabase Auth a la cuenta administradora. Al abrir el enlace del correo, entrar en **Datos y respaldo** y guardar una contraseña nueva. Después, el inicio de sesión permite sincronizar entre dispositivos. La sincronización aún requiere una prueba con la cuenta activada.
 
 No se importa ni se conecta a la base de Dulce Gestión.
 
