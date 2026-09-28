@@ -15,9 +15,9 @@ Panel interno para un emprendimiento que vende tecnología por Instagram, WhatsA
 
 Requiere Node.js 20 o posterior. Ejecutar `npm run serve` y abrir `http://localhost:4173`. `npm test` ejecuta pruebas de reglas de stock y pedidos.
 
-## Estado de la sincronización
+## Sincronización
 
-La aplicación guarda una copia local en `localStorage`. El código de sincronización está preparado, pero falta crear un proyecto nuevo para Cualitec, ejecutar [`supabase/schema.sql`](supabase/schema.sql), crear una cuenta de acceso en Supabase Auth y configurar `cloud-config.js` con la URL y la clave **publicable**. **No cargar datos reales para uso compartido entre dispositivos hasta conectar y verificar esa base.**
+La aplicación guarda una copia local en `localStorage` y se conecta al proyecto Supabase exclusivo de Cualitec configurado en `cloud-config.js`. El esquema de [`supabase/schema.sql`](supabase/schema.sql) ya fue aplicado. Falta crear una cuenta de acceso en Supabase Auth y verificar el inicio de sesión y la sincronización entre dispositivos. **No cargar datos reales para uso compartido entre dispositivos hasta completar esa verificación.**
 
 No se importa ni se conecta a la base de Dulce Gestión.
 
