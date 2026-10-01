@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyState, normalizeState, findProductByCode, addPurchase, adjustStock, saveOrder, availableQuantity, deliverOrder, orderTotal, monthlySummary, paidAmount, recordPayment, stockMovements } from "../domain.js";
-import { salesReportCsv } from "../reports.js";
+import { emptyState, normalizeState, findProductByCode, addPurchase, adjustStock, saveOrder, availableQuantity, deliverOrder, orderTotal, monthlySummary, paidAmount, recordPayment, stockMovements, paymentMovements } from "../domain.js";
+import { salesReportCsv, paymentReportCsv } from "../reports.js";
 
 const product = { id: "p1", name: "Auriculares", stock: 0, averageCost: 0, price: 1000 };
 const order = (id, status, quantity) => ({ id, customerName: "Ana", contact: "@ana", channel: "Instagram", status, deposit: 0, lines: [{ productId: "p1", quantity, unitPrice: 1000 }] });
@@ -112,5 +112,20 @@ test("el historial de stock reúne entradas, ajustes y salidas por venta", () =>
   assert.deepEqual(stockMovements(delivered).map(item => [item.type, item.quantity, item.date]), [["Venta", -1, "2026-10-01"], ["Ajuste", -1, "2026-09-30"], ["Compra", 3, "2026-09-29"]]);
   assert.equal(delivered.products[0].stock, 1);
   assert.match(stockMovements(delivered)[1].detail, /Recuento/);
+});
+
+test("el informe de cobros separa fechas, devoluciones y señas antiguas", () => {
+  const base = { ...structuredClone(emptyState), products: [product] };
+  const saved = saveOrder(base, { ...order("o1", "inquiry", 1), customerName: "=Ana", deposit: 100 });
+  const paid = recordPayment(saved, { id: "pay1", orderId: "o1", kind: "payment", amount: 400, method: "transfer", date: "2026-09-30", note: "Seña" });
+  const refunded = recordPayment(paid, { id: "pay2", orderId: "o1", kind: "refund", amount: 50, method: "cash", date: "2026-10-01", note: "Ajuste" });
+  const movements = paymentMovements(refunded);
+  assert.deepEqual(movements.map(item => [item.date, item.method, item.amount]), [["2026-10-01", "cash", -50], ["2026-09-30", "transfer", 400], ["", "legacy", 100]]);
+  const october = movements.filter(item => item.date >= "2026-10-01");
+  assert.equal(october.reduce((sum, item) => sum + item.amount, 0), -50);
+  const csv = paymentReportCsv(movements);
+  assert.match(csv, /"'=Ana"/);
+  assert.match(csv, /"-50,00"/);
+  assert.match(csv, /"Sin medio registrado"/);
 });
 

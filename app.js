@@ -1,6 +1,6 @@
-import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, findProductByCode, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary, stockMovements } from "./domain.js?v=stock-20261001";
+import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, findProductByCode, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary, stockMovements, paymentMovements } from "./domain.js?v=payments-20261001";
 import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readCloud, writeCloud, listCloudHistory, readCloudRevision } from "./cloud.js";
-import { salesReportCsv } from "./reports.js";
+import { salesReportCsv, paymentReportCsv } from "./reports.js?v=payments-20261001";
 
 const KEY = "cualitec-gestion-v1";
 let state;
@@ -10,6 +10,7 @@ let view = "dashboard";
 let session = null, cloudRevision = 0, cloudEnabled = false, cloudPending = null;
 let cloudCheck = "";
 let salesFilters = { from: "", to: "", channel: "" };
+let paymentFilters = { from: "", to: "", method: "" };
 let stockFilters = { from: "", to: "", productId: "" };
 let historySnapshots = [], historyStatus = "", historyAvailable = false;
 let saveQueue = Promise.resolve();
@@ -80,6 +81,7 @@ function customers() {
 }
 
 const filteredSales = () => state.sales.filter(item => (!salesFilters.from || item.date >= salesFilters.from) && (!salesFilters.to || item.date <= salesFilters.to) && (!salesFilters.channel || item.channel === salesFilters.channel));
+const filteredPayments = () => paymentMovements(state).filter(item => (!paymentFilters.from || (item.date && item.date >= paymentFilters.from)) && (!paymentFilters.to || (item.date && item.date <= paymentFilters.to)) && (!paymentFilters.method || item.method === paymentFilters.method));
 
 function sales() {
   const filtered = filteredSales();
@@ -102,7 +104,13 @@ function sales() {
   const filterForm = `<form id="sales-filter-form" class="form-grid"><label>Desde<input name="from" type="date" value="${esc(salesFilters.from)}"></label><label>Hasta<input name="to" type="date" value="${esc(salesFilters.to)}"></label><label>Canal<select name="channel">${option("", "Todos los canales", !salesFilters.channel)}${[...new Set(state.sales.map(item => item.channel))].map(item => option(item, item, item === salesFilters.channel)).join("")}</select></label><div class="form-actions"><button class="primary">Aplicar filtros</button><button id="clear-sales-filters" type="button" class="secondary">Limpiar</button><button id="export-sales" type="button" class="secondary" ${filtered.length ? "" : "disabled"}>Descargar CSV</button></div></form>`;
   const table = filtered.length ? rows(["Fecha", "Venta", "Cliente", "Canal", "Productos", "Descuento", "Envío", "Total", "Saldo", ""], [...filtered].reverse().map(item => `<tr><td>${esc(item.date)}</td><td>${esc(item.receiptNumber || `A${String(state.sales.indexOf(item) + 1).padStart(3, "0")}`)}</td><td>${esc(item.customerName)}</td><td>${esc(item.channel)}</td><td>${item.lines.map(line => `${esc(line.productName)} × ${line.quantity}`).join("<br>")}</td><td>${money(item.discount || 0)}</td><td>${money(item.shippingAmount || 0)}</td><td>${money(item.total)}</td><td>${money(item.total - paidAmount(state, item.orderId))}</td><td><button class="text-button" data-receipt="${esc(item.id)}">Comprobante</button></td></tr>`).join("")) : empty("No hay ventas para los filtros elegidos.");
   const productTable = products.size ? rows(["Producto", "Unidades", "Venta neta", "Costo", "Margen"], [...products.values()].sort((a, b) => b.revenue - a.revenue).map(item => `<tr><td>${esc(item.name)}</td><td>${item.quantity}</td><td>${money(item.revenue)}</td><td>${money(item.cost)}</td><td>${money(item.revenue - item.cost)}</td></tr>`).join("")) : empty("Sin productos vendidos en este período.");
-  return `${section("Filtrar ventas", filterForm)}<div class="stats"><article><span>Ventas</span><strong>${filtered.length}</strong><small>Total ${money(totals.revenue)}</small></article><article><span>Margen de productos</span><strong>${money(totals.revenue - totals.shipping - totals.cost)}</strong><small>Sin cargo de envío ni costo de mercadería</small></article><article><span>Descuentos</span><strong>${money(totals.discount)}</strong><small>Aplicados manualmente</small></article><article><span>Por cobrar</span><strong>${money(totals.outstanding)}</strong><small>De las ventas filtradas</small></article></div>${section("Ventas realizadas", table)}${section("Productos vendidos", productTable)}`;
+  const payments = filteredPayments();
+  const charged = payments.filter(item => item.kind === "payment").reduce((sum, item) => sum + item.amount, 0);
+  const refunded = -payments.filter(item => item.kind === "refund").reduce((sum, item) => sum + item.amount, 0);
+  const paymentFilterForm = `<form id="payment-filter-form" class="form-grid"><label>Desde<input name="from" type="date" value="${esc(paymentFilters.from)}"></label><label>Hasta<input name="to" type="date" value="${esc(paymentFilters.to)}"></label><label>Medio de pago<select name="method">${option("", "Todos los medios", !paymentFilters.method)}${Object.entries(paymentMethods).map(([key, value]) => option(key, value, key === paymentFilters.method)).join("")}${paymentMovements(state).some(item => item.method === "legacy") ? option("legacy", "Sin medio registrado", paymentFilters.method === "legacy") : ""}</select></label><div class="form-actions"><button class="primary">Aplicar filtros</button><button id="clear-payment-filters" type="button" class="secondary">Limpiar</button><button id="export-payments" type="button" class="secondary" ${payments.length ? "" : "disabled"}>Descargar CSV</button></div></form>`;
+  const paymentTable = payments.length ? rows(["Fecha", "Movimiento", "Cliente", "Comprobante", "Medio", "Importe neto", "Nota"], payments.map(item => `<tr><td>${esc(item.date || "Sin fecha")}</td><td>${item.kind === "refund" ? "Devolución" : "Cobro"}</td><td>${esc(item.customerName)}</td><td>${esc(item.receiptNumber || "—")}</td><td>${esc(item.method === "legacy" ? "Sin medio registrado" : paymentMethods[item.method] || item.method)}</td><td class="${item.amount < 0 ? "stock-out" : "stock-in"}">${item.amount < 0 ? "−" : "+"}${money(Math.abs(item.amount))}</td><td>${esc(item.note || "—")}</td></tr>`).join("")) : empty("No hay cobros ni devoluciones para los filtros elegidos.");
+  const paymentReport = `${paymentFilterForm}<p class="form-hint">Este informe usa la fecha del cobro o devolución; puede diferir de la fecha de venta. Las señas antiguas sin fecha quedan fuera al filtrar por período.</p><div class="stats payment-stats"><article><span>Cobrado</span><strong>${money(charged)}</strong></article><article><span>Devuelto</span><strong>${money(refunded)}</strong></article><article><span>Ingreso neto</span><strong>${money(charged - refunded)}</strong></article></div>${paymentTable}`;
+  return `${section("Filtrar ventas", filterForm)}<div class="stats"><article><span>Ventas</span><strong>${filtered.length}</strong><small>Total ${money(totals.revenue)}</small></article><article><span>Margen de productos</span><strong>${money(totals.revenue - totals.shipping - totals.cost)}</strong><small>Sin cargo de envío ni costo de mercadería</small></article><article><span>Descuentos</span><strong>${money(totals.discount)}</strong><small>Aplicados manualmente</small></article><article><span>Por cobrar</span><strong>${money(totals.outstanding)}</strong><small>De las ventas filtradas</small></article></div>${section("Ventas realizadas", table)}${section("Productos vendidos", productTable)}${section("Cobros y devoluciones por fecha", paymentReport)}`;
 }
 
 function dataView() {
@@ -188,12 +196,19 @@ document.addEventListener("click", event => {
   if (target.classList.contains("remove-line")) { const container = target.closest("#order-lines"); if (container.children.length > 1) target.closest(".order-line").remove(); else toast("El pedido necesita al menos un producto."); }
   if (target.id === "clear-order") { const form = document.querySelector("#order-form"); form.reset(); form.elements.id.value = ""; form.querySelector("#order-lines").innerHTML = state.products.length ? orderLine() : ""; syncOrderControls(form, true); }
   if (target.id === "clear-sales-filters") { salesFilters = { from: "", to: "", channel: "" }; render(); }
+  if (target.id === "clear-payment-filters") { paymentFilters = { from: "", to: "", method: "" }; render(); }
   if (target.id === "clear-stock-filters") { stockFilters = { from: "", to: "", productId: "" }; render(); }
   if (target.id === "export-sales") {
     const report = salesReportCsv(state, filteredSales());
     const blob = new Blob(["\ufeff", report], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob), link = document.createElement("a");
     link.href = url; link.download = `cualitec-ventas-${salesFilters.from || "inicio"}-${salesFilters.to || "hoy"}.csv`;
+    link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  if (target.id === "export-payments") {
+    const blob = new Blob(["\ufeff", paymentReportCsv(filteredPayments())], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob), link = document.createElement("a");
+    link.href = url; link.download = `cualitec-cobros-${paymentFilters.from || "inicio"}-${paymentFilters.to || "hoy"}.csv`;
     link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   if (target.dataset.receipt) window.open(`receipt.html?sale=${encodeURIComponent(target.dataset.receipt)}`, "_blank", "noopener");
@@ -237,6 +252,11 @@ document.addEventListener("click", event => {
 });
 
 document.addEventListener("submit", async event => {
+  if (event.target.getAttribute("id") === "payment-filter-form") {
+    event.preventDefault(); const data = Object.fromEntries(new FormData(event.target));
+    if (data.from && data.to && data.from > data.to) { toast("La fecha inicial debe ser anterior a la final."); return; }
+    paymentFilters = { from: data.from, to: data.to, method: data.method }; render(); return;
+  }
   if (event.target.getAttribute("id") === "stock-filter-form") {
     event.preventDefault(); const data = Object.fromEntries(new FormData(event.target));
     if (data.from && data.to && data.from > data.to) { toast("La fecha inicial debe ser anterior a la final."); return; }

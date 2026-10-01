@@ -13,6 +13,7 @@ Panel interno para un emprendimiento que vende tecnología por Instagram, WhatsA
 - Cobros parciales y devoluciones con fecha, medio de pago e historial. El saldo se calcula por pedido; las señas registradas antes de esta actualización se conservan.
 - Entrega en el día en Montevideo o por DAC al interior. Por defecto, el destinatario paga el envío al recibir; también se puede cargar un envío cobrado por Cualitec.
 - Clientes derivados de pedidos e informes de ventas con filtros por rango de fechas y canal, descuentos, saldo pendiente y resultados por producto. El listado filtrado se puede descargar en CSV para abrirlo en Excel.
+- Informe de cobros y devoluciones por fecha y medio de pago, con importes cobrados, devueltos e ingreso neto. Se puede descargar el listado filtrado en CSV.
 - Comprobante de venta en formato A4 basado en el ejemplo de Cualitec. Se abre al entregar un pedido y se puede volver a abrir desde **Ventas** para imprimirlo o guardarlo como PDF desde el navegador. Es un comprobante comercial, no una factura fiscal electrónica.
 - Respaldo e importación en JSON propios de Cualitec.
 

@@ -128,3 +128,15 @@ export function stockMovements(state) {
   return movements.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
 }
 
+export function paymentMovements(state) {
+  const orders = new Map(state.orders.map(item => [item.id, item]));
+  const receipts = new Map(state.sales.map(item => [item.orderId, item.receiptNumber || ""]));
+  const movements = [];
+  for (const order of state.orders) if (Number(order.deposit || 0) > 0) movements.push({ id: `legacy_${order.id}`, date: "", orderId: order.id, receiptNumber: receipts.get(order.id) || "", customerName: order.customerName, channel: order.channel, kind: "payment", method: "legacy", amount: Number(order.deposit), note: "Seña anterior; fecha y medio originales no registrados" });
+  for (const payment of state.payments || []) {
+    const order = orders.get(payment.orderId);
+    movements.push({ id: payment.id, date: payment.date, orderId: payment.orderId, receiptNumber: receipts.get(payment.orderId) || "", customerName: order?.customerName || "Pedido no encontrado", channel: order?.channel || "", kind: payment.kind, method: payment.method, amount: payment.kind === "refund" ? -Number(payment.amount) : Number(payment.amount), note: payment.note || "" });
+  }
+  return movements.sort((a, b) => b.date.localeCompare(a.date));
+}
+
