@@ -4,9 +4,10 @@ Panel interno para un emprendimiento que vende tecnología por Instagram, WhatsA
 
 ## Funciones actuales
 
-- Catálogo de productos con código de barras, precio, costo promedio, stock y mínimo de reposición.
+- Catálogo de variantes (color o capacidad), cada una con código de barras, SKU, precio, costo promedio, stock y mínimo de reposición.
 - Registro de compras y ajustes de stock con motivo.
-- Pedidos como consulta, reserva de stock o encargo sin stock. Una entrega descuenta unidades y crea una venta una sola vez.
+- Pedidos con varios productos como consulta, reserva de stock o encargo sin stock. Una entrega descuenta unidades y crea una venta una sola vez.
+- Cobros parciales y devoluciones con fecha, medio de pago e historial. El saldo se calcula por pedido; las señas registradas antes de esta actualización se conservan.
 - Entrega en el día en Montevideo o por DAC al interior, con envío pagado por el destinatario al recibir.
 - Clientes derivados de pedidos, ventas e informe mensual de facturación, costo y ganancia bruta.
 - Respaldo e importación en JSON propios de Cualitec.

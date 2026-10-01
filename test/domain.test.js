@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyState, addPurchase, saveOrder, availableQuantity, deliverOrder, monthlySummary } from "../domain.js";
+import { emptyState, normalizeState, addPurchase, saveOrder, availableQuantity, deliverOrder, monthlySummary, paidAmount, recordPayment } from "../domain.js";
 
 const product = { id: "p1", name: "Auriculares", stock: 0, averageCost: 0, price: 1000 };
 const order = (id, status, quantity) => ({ id, customerName: "Ana", contact: "@ana", channel: "Instagram", status, deposit: 0, lines: [{ productId: "p1", quantity, unitPrice: 1000 }] });
@@ -30,5 +30,42 @@ test("un pedido por encargo se entrega al ingresar stock y crea una sola venta",
   assert.equal(delivered.sales.length, 1);
   assert.deepEqual(monthlySummary(delivered, "2026-09"), { sales: 1, revenue: 1000, cost: 600 });
   assert.throws(() => deliverOrder(delivered, "o1", "2026-09-28"), /nuevamente/);
+});
+
+test("un pedido con dos variantes reserva y descuenta ambas al entregar", () => {
+  const initial = { ...structuredClone(emptyState), products: [{ ...product, stock: 2 }, { ...product, id: "p2", variant: "Negro", stock: 1, price: 1500 }] };
+  const multi = { ...order("o1", "ready", 1), lines: [{ productId: "p1", quantity: 1, unitPrice: 1000 }, { productId: "p2", quantity: 1, unitPrice: 1500 }] };
+  const reserved = saveOrder(initial, multi);
+  assert.equal(availableQuantity(reserved, "p1"), 1);
+  assert.equal(availableQuantity(reserved, "p2"), 0);
+  assert.throws(() => saveOrder(reserved, { ...order("o2", "reserved", 1), lines: [{ productId: "p2", quantity: 1, unitPrice: 1500 }] }), /stock/);
+  const delivered = deliverOrder(reserved, "o1", "2026-10-01");
+  assert.deepEqual(delivered.products.map(item => item.stock), [1, 0]);
+  assert.equal(delivered.sales[0].total, 2500);
+  assert.match(delivered.sales[0].lines[1].productName, /Negro/);
+});
+
+test("cobros parciales y devoluciones respetan el saldo", () => {
+  const initial = saveOrder({ ...structuredClone(emptyState), products: [product] }, order("o1", "inquiry", 1));
+  const payment = { id: "pay1", orderId: "o1", kind: "payment", amount: 400, method: "transfer", date: "2026-10-01" };
+  const partial = recordPayment(initial, payment);
+  assert.equal(paidAmount(partial, "o1"), 400);
+  assert.throws(() => recordPayment(partial, { ...payment, id: "pay2", amount: 601 }), /saldo/);
+  const completed = recordPayment(partial, { ...payment, id: "pay2", amount: 600 });
+  assert.equal(paidAmount(completed, "o1"), 1000);
+  const refunded = recordPayment(completed, { ...payment, id: "pay3", kind: "refund", amount: 300 });
+  assert.equal(paidAmount(refunded, "o1"), 700);
+  assert.throws(() => recordPayment(refunded, { ...payment, id: "pay4", kind: "refund", amount: 701 }), /devolución/);
+  assert.throws(() => saveOrder(completed, { ...order("o1", "inquiry", 1), lines: [{ productId: "p1", quantity: 1, unitPrice: 900 }] }), /pagos/);
+});
+
+test("un respaldo antiguo conserva la seña y acepta nuevos pagos", () => {
+  const old = { ...structuredClone(emptyState), products: [product], orders: [{ ...order("o1", "inquiry", 1), deposit: 200 }] };
+  delete old.payments;
+  const restored = normalizeState(old);
+  assert.deepEqual(restored.payments, []);
+  assert.equal(paidAmount(restored, "o1"), 200);
+  const paid = recordPayment(restored, { id: "pay1", orderId: "o1", kind: "payment", amount: 300, method: "cash", date: "2026-10-01" });
+  assert.equal(paidAmount(paid, "o1"), 500);
 });
 

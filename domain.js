@@ -1,5 +1,6 @@
-export const emptyState = { products: [], purchases: [], orders: [], sales: [], stockAdjustments: [] };
+export const emptyState = { products: [], purchases: [], orders: [], sales: [], stockAdjustments: [], payments: [] };
 export const orderStatuses = { inquiry: "Consulta", reserved: "Reservado", requested: "Por encargo", ready: "Listo para entregar", delivered: "Entregado", cancelled: "Cancelado" };
+export const paymentMethods = { transfer: "Transferencia", cash: "Efectivo", card: "Tarjeta", mercadopago: "Mercado Pago", other: "Otro" };
 
 export function normalizeState(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Los datos no son válidos.");
@@ -14,7 +15,7 @@ export function normalizeState(input) {
 }
 
 export function reservedQuantity(state, productId, exceptOrderId = null) {
-  return state.orders.filter(order => order.id !== exceptOrderId && order.status === "reserved")
+  return state.orders.filter(order => order.id !== exceptOrderId && ["reserved", "ready"].includes(order.status))
     .flatMap(order => order.lines || []).filter(line => line.productId === productId)
     .reduce((sum, line) => sum + Number(line.quantity), 0);
 }
@@ -44,17 +45,37 @@ export function adjustStock(state, adjustment) {
 export function saveOrder(state, order) {
   if (!String(order.customerName || "").trim() || !String(order.contact || "").trim()) throw new Error("Indicá cliente y contacto.");
   if (!Array.isArray(order.lines) || !order.lines.length) throw new Error("Agregá al menos un producto.");
+  const productIds = new Set();
   for (const line of order.lines) {
     if (!state.products.some(item => item.id === line.productId) || !Number.isInteger(Number(line.quantity)) || Number(line.quantity) <= 0 || !Number.isFinite(Number(line.unitPrice)) || Number(line.unitPrice) < 0) throw new Error("Revisá el producto, la cantidad y el precio.");
-    if (order.status === "reserved" && Number(line.quantity) > availableQuantity(state, line.productId, order.id)) throw new Error("No hay stock disponible para reservar esa cantidad.");
+    if (productIds.has(line.productId)) throw new Error("Agregá cada variante una sola vez y ajustá la cantidad.");
+    productIds.add(line.productId);
+    if (["reserved", "ready"].includes(order.status) && Number(line.quantity) > availableQuantity(state, line.productId, order.id)) throw new Error("No hay stock disponible para reservar esa cantidad.");
   }
   if (!Object.hasOwn(orderStatuses, order.status)) throw new Error("El estado del pedido no es válido.");
-  if (Number(order.deposit || 0) < 0 || Number(order.deposit || 0) > orderTotal(order)) throw new Error("La seña supera el total del pedido.");
-  const existing = state.orders.some(item => item.id === order.id);
-  return { ...state, orders: existing ? state.orders.map(item => item.id === order.id ? order : item) : [...state.orders, order] };
+  const previous = state.orders.find(item => item.id === order.id);
+  const paid = paidAmount(state, order.id) - Number(previous?.deposit || 0) + Number(order.deposit || 0);
+  if (!Number.isFinite(paid) || paid < 0 || paid > orderTotal(order)) throw new Error("Los pagos superan el total del pedido.");
+  return { ...state, orders: previous ? state.orders.map(item => item.id === order.id ? order : item) : [...state.orders, order] };
 }
 
 export function orderTotal(order) { return (order.lines || []).reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitPrice), 0); }
+
+export function paidAmount(state, orderId) {
+  const order = state.orders.find(item => item.id === orderId);
+  return Number(order?.deposit || 0) + (state.payments || []).filter(item => item.orderId === orderId).reduce((sum, item) => sum + (item.kind === "refund" ? -Number(item.amount) : Number(item.amount)), 0);
+}
+
+export function recordPayment(state, payment) {
+  const order = state.orders.find(item => item.id === payment.orderId);
+  const amount = Number(payment.amount);
+  if (!order || !Number.isFinite(amount) || amount <= 0 || !Object.hasOwn(paymentMethods, payment.method) || !["payment", "refund"].includes(payment.kind) || !/^\d{4}-\d{2}-\d{2}$/.test(payment.date || "")) throw new Error("Revisá pedido, fecha, importe y medio de pago.");
+  if ((state.payments || []).some(item => item.id === payment.id)) throw new Error("Ese movimiento ya existe.");
+  const paid = paidAmount(state, order.id);
+  if (payment.kind === "payment" && (order.status === "cancelled" || amount > orderTotal(order) - paid)) throw new Error("El pago supera el saldo del pedido o el pedido está cancelado.");
+  if (payment.kind === "refund" && amount > paid) throw new Error("La devolución supera lo cobrado.");
+  return { ...state, payments: [...(state.payments || []), { ...payment, amount }] };
+}
 
 export function deliverOrder(state, orderId, date) {
   const order = state.orders.find(item => item.id === orderId);
@@ -63,8 +84,8 @@ export function deliverOrder(state, orderId, date) {
   const saleLines = [];
   for (const line of order.lines) {
     const product = products.find(item => item.id === line.productId);
-    if (!product || Number(product.stock) < Number(line.quantity) || (order.status !== "reserved" && availableQuantity(state, line.productId) < Number(line.quantity))) throw new Error("No hay stock suficiente para entregar el pedido.");
-    saleLines.push({ ...line, productName: product.name, unitCost: Number(product.averageCost || 0) });
+    if (!product || Number(product.stock) < Number(line.quantity) || (!["reserved", "ready"].includes(order.status) && availableQuantity(state, line.productId) < Number(line.quantity))) throw new Error("No hay stock suficiente para entregar el pedido.");
+    saleLines.push({ ...line, productName: `${product.name}${product.variant ? ` · ${product.variant}` : ""}`, unitCost: Number(product.averageCost || 0) });
     product.stock -= Number(line.quantity);
   }
   const sale = { id: `sale_${crypto.randomUUID()}`, orderId, customerName: order.customerName, channel: order.channel, date, lines: saleLines, total: orderTotal(order) };
