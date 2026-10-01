@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyState, normalizeState, addPurchase, saveOrder, availableQuantity, deliverOrder, orderTotal, monthlySummary, paidAmount, recordPayment } from "../domain.js";
+import { emptyState, normalizeState, findProductByCode, addPurchase, saveOrder, availableQuantity, deliverOrder, orderTotal, monthlySummary, paidAmount, recordPayment } from "../domain.js";
 import { salesReportCsv } from "../reports.js";
 
 const product = { id: "p1", name: "Auriculares", stock: 0, averageCost: 0, price: 1000 };
@@ -94,5 +94,12 @@ test("el CSV de ventas respeta el filtro recibido y protege los datos de cliente
   assert.match(csv, /"900,00"/);
   assert.match(csv, /"300,00"/);
   assert.equal(salesReportCsv(delivered, []).trim().split("\n").length, 1);
+});
+
+test("encuentra una variante por código de barras o SKU", () => {
+  const products = [{ ...product, barcode: "001234", sku: "AUR-01" }];
+  assert.equal(findProductByCode(products, "001234")?.id, "p1");
+  assert.equal(findProductByCode(products, " aur-01 ")?.id, "p1");
+  assert.equal(findProductByCode(products, "1234"), undefined);
 });
 

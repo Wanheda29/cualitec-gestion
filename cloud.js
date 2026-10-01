@@ -45,3 +45,13 @@ export async function writeCloud(data, revision) {
   if (error) throw new Error(error.message);
   return Number(nextRevision);
 }
+export async function listCloudHistory() {
+  const { data, error } = await (await client()).from("owner_data_history").select("revision,created_at").order("revision", { ascending: false }).limit(50);
+  if (error) throw new Error(error.message);
+  return data;
+}
+export async function readCloudRevision(revision) {
+  const { data, error } = await (await client()).from("owner_data_history").select("data").eq("revision", revision).single();
+  if (error) throw new Error(error.message);
+  return data.data;
+}

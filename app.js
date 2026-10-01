@@ -1,5 +1,5 @@
-import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary } from "./domain.js";
-import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readCloud, writeCloud } from "./cloud.js";
+import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, findProductByCode, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary } from "./domain.js";
+import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readCloud, writeCloud, listCloudHistory, readCloudRevision } from "./cloud.js";
 import { salesReportCsv } from "./reports.js";
 
 const KEY = "cualitec-gestion-v1";
@@ -10,6 +10,7 @@ let view = "dashboard";
 let session = null, cloudRevision = 0, cloudEnabled = false, cloudPending = null;
 let cloudCheck = "";
 let salesFilters = { from: "", to: "", channel: "" };
+let historySnapshots = [], historyStatus = "", historyAvailable = false;
 let saveQueue = Promise.resolve();
 const app = document.querySelector("#app");
 const money = value => new Intl.NumberFormat("es-UY", { style: "currency", currency: "UYU", maximumFractionDigits: 2 }).format(Number(value || 0));
@@ -20,7 +21,8 @@ const canonical = value => JSON.stringify(value, (_key, item) => item && typeof 
 const persist = next => {
   state = next; localStorage.setItem(KEY, JSON.stringify(state)); render();
   if (cloudEnabled) {
-    saveQueue = saveQueue.then(async () => { cloudRevision = await writeCloud(state, cloudRevision); })
+    const snapshot = structuredClone(next);
+    saveQueue = saveQueue.then(async () => { cloudRevision = await writeCloud(snapshot, cloudRevision); if (view === "data") await refreshHistory(); })
       .catch(error => { cloudEnabled = false; toast(`No se sincronizó: ${error.message}. Descargá un respaldo y revisá la cuenta.`); render(); });
   }
 };
@@ -28,7 +30,7 @@ const toast = message => { const target = document.querySelector("#toast"); targ
 const option = (value, label, selected = false) => `<option value="${esc(value)}" ${selected ? "selected" : ""}>${esc(label)}</option>`;
 const productOptions = selected => state.products.map(item => option(item.id, `${item.name}${item.variant ? ` · ${item.variant}` : ""}`, item.id === selected)).join("");
 const productName = productId => { const item = state.products.find(product => product.id === productId); return item ? `${item.name}${item.variant ? ` · ${item.variant}` : ""}` : "Producto eliminado"; };
-const orderLine = (line = {}) => `<div class="order-line"><label>Producto / variante<select name="productId" required>${productOptions(line.productId)}</select></label><label>Cantidad<input name="quantity" type="number" min="1" step="1" value="${esc(line.quantity ?? 1)}" required></label><label>Precio unitario<input name="unitPrice" type="number" min="0" step="0.01" value="${esc(line.unitPrice ?? state.products.find(item => item.id === (line.productId || state.products[0]?.id))?.price ?? "")}" required></label><button class="text-button remove-line" type="button">Quitar</button></div>`;
+const orderLine = (line = {}) => `<div class="order-line" ${Object.keys(line).length ? "" : 'data-pristine="true"'}><label>Producto / variante<select name="productId" required>${productOptions(line.productId)}</select></label><label>Cantidad<input name="quantity" type="number" min="1" step="1" value="${esc(line.quantity ?? 1)}" required></label><label>Precio unitario<input name="unitPrice" type="number" min="0" step="0.01" value="${esc(line.unitPrice ?? state.products.find(item => item.id === (line.productId || state.products[0]?.id))?.price ?? "")}" required></label><button class="text-button remove-line" type="button">Quitar</button></div>`;
 const section = (title, body, action = "") => `<section class="panel"><div class="panel-head"><h2>${title}</h2>${action}</div>${body}</section>`;
 const empty = label => `<p class="empty">${label}</p>`;
 const badge = label => `<span class="badge">${esc(label)}</span>`;
@@ -46,8 +48,8 @@ function dashboard() {
 
 function products() {
   const form = `<form id="product-form" class="form-grid"><input name="id" type="hidden"><label>Producto o modelo<input name="name" required placeholder="Ej. Auriculares inalámbricos"></label><label>Categoría<input name="category" placeholder="Ej. Audio"></label><label>Variante (color, capacidad…)<input name="variant" placeholder="Ej. Negro · 128 GB"></label><label>Código de barras de esta variante<input name="barcode" inputmode="numeric" placeholder="Opcional"></label><label>SKU de esta variante<input name="sku" placeholder="Opcional"></label><label>Precio de venta<input name="price" type="number" min="0" step="0.01" required></label><label>Stock mínimo<input name="minStock" type="number" min="0" step="1" value="0" required></label><p class="form-hint wide">Creá un registro por cada color o capacidad. Cada variante tiene stock, precio y códigos propios.</p><div class="form-actions"><button class="primary">Guardar variante</button><button type="reset" class="secondary">Limpiar</button></div></form>`;
-  const table = state.products.length ? rows(["Producto", "Código de barras", "Stock", "Disponible", "Costo prom.", "Precio", ""], state.products.map(item => `<tr><td><strong>${esc(item.name)}</strong><small>${esc([item.category, item.variant].filter(Boolean).join(" · "))}</small></td><td>${esc(item.barcode || item.sku || "—")}</td><td>${item.stock}</td><td>${availableQuantity(state, item.id)}</td><td>${money(item.averageCost)}</td><td>${money(item.price)}</td><td><button class="text-button" data-edit-product="${esc(item.id)}">Editar</button></td></tr>`).join("")) : empty("Agregá el primer producto de Cualitec.");
-  return `<div class="grid split">${section("Catálogo", table)}${section("Agregar o editar producto", form)}</div>`;
+  const table = state.products.length ? rows(["Producto", "Código de barras", "Stock", "Disponible", "Costo prom.", "Precio", ""], state.products.map(item => `<tr data-product-row data-search="${esc([item.name, item.category, item.variant, item.barcode, item.sku].join(" ").toLowerCase())}"><td><strong>${esc(item.name)}</strong><small>${esc([item.category, item.variant].filter(Boolean).join(" · "))}</small></td><td>${esc(item.barcode || item.sku || "—")}</td><td>${item.stock}</td><td>${availableQuantity(state, item.id)}</td><td>${money(item.averageCost)}</td><td>${money(item.price)}</td><td><button class="text-button" data-edit-product="${esc(item.id)}">Editar</button></td></tr>`).join("")) : empty("Agregá el primer producto de Cualitec.");
+  return `<div class="grid split">${section("Catálogo", `<label class="catalog-search">Buscar por nombre, código de barras o SKU<input id="product-search" autocomplete="off" placeholder="Escribí o escaneá un código"></label><p id="product-search-empty" class="empty" hidden>No hay productos para esa búsqueda.</p>${table}`)}${section("Agregar o editar producto", form)}</div>`;
 }
 
 function purchases() {
@@ -58,7 +60,7 @@ function purchases() {
 }
 
 function orders() {
-  const form = `<form id="order-form" class="form-grid"><input name="id" type="hidden"><label>Cliente<input name="customerName" required></label><label>Contacto / usuario de red<input name="contact" required placeholder="Teléfono o @usuario"></label><label>Canal<select name="channel">${["Instagram", "WhatsApp", "Facebook", "Otro"].map(x => option(x, x)).join("")}</select></label><label>Estado<select name="status">${Object.entries(orderStatuses).filter(([key]) => key !== "delivered").map(([key, value]) => option(key, value)).join("")}</select></label><div class="wide"><div id="order-lines" class="order-lines">${state.products.length ? orderLine() : ""}</div><button id="add-line" class="secondary" type="button" ${state.products.length ? "" : "disabled"}>Agregar producto</button></div><label>Descuento manual<select name="discountType">${Object.entries(discountTypes).map(([key, value]) => option(key, value)).join("")}</select></label><label>Valor del descuento<input name="discountValue" type="number" min="0" step="0.01" value="0" required></label><label>Entrega<select name="deliveryMethod"><option value="montevideo">Montevideo · en el día</option><option value="dac">Interior · DAC</option></select></label><label>Fecha prevista de entrega<input name="deliveryDate" type="date"></label><label>Envío<select name="shippingPayer"><option value="recipient_on_delivery">Destinatario paga al recibir</option><option value="included_in_sale">Cualitec cobra el envío</option></select></label><label>Cargo de envío<input name="shippingAmount" type="number" min="0" step="0.01" value="0" required></label><label>Garantía (días)<input name="warrantyDays" type="number" min="0" step="1" value="30" required></label><label>Guía DAC<input name="trackingCode" placeholder="Opcional"></label><label class="wide">Notas<textarea name="notes" rows="2" placeholder="Dirección, acuerdos, preferencias..."></textarea></label><p class="form-hint wide">Descuento y cargo de envío se ingresan manualmente. Por defecto, el destinatario paga el envío al recibir y no se suma a la venta.</p><div class="form-actions"><button class="primary" ${state.products.length ? "" : "disabled"}>Guardar pedido</button><button id="clear-order" class="secondary" type="button">Limpiar</button></div></form>`;
+  const form = `<form id="order-form" class="form-grid"><input name="id" type="hidden"><label>Cliente<input name="customerName" required></label><label>Contacto / usuario de red<input name="contact" required placeholder="Teléfono o @usuario"></label><label>Canal<select name="channel">${["Instagram", "WhatsApp", "Facebook", "Otro"].map(x => option(x, x)).join("")}</select></label><label>Estado<select name="status">${Object.entries(orderStatuses).filter(([key]) => key !== "delivered").map(([key, value]) => option(key, value)).join("")}</select></label><div class="wide"><label>Código de barras o SKU<input id="order-code" autocomplete="off" placeholder="Escribí o escaneá el código"></label><div class="form-actions"><button id="add-by-code" class="secondary" type="button">Agregar por código</button></div><p class="form-hint">El lector escribe el código aquí como si fuera un teclado. También podés ingresarlo a mano y pulsar Enter.</p></div><div class="wide"><div id="order-lines" class="order-lines">${state.products.length ? orderLine() : ""}</div><button id="add-line" class="secondary" type="button" ${state.products.length ? "" : "disabled"}>Agregar producto</button></div><label>Descuento manual<select name="discountType">${Object.entries(discountTypes).map(([key, value]) => option(key, value)).join("")}</select></label><label>Valor del descuento<input name="discountValue" type="number" min="0" step="0.01" value="0" required></label><label>Entrega<select name="deliveryMethod"><option value="montevideo">Montevideo · en el día</option><option value="dac">Interior · DAC</option></select></label><label>Fecha prevista de entrega<input name="deliveryDate" type="date"></label><label>Envío<select name="shippingPayer"><option value="recipient_on_delivery">Destinatario paga al recibir</option><option value="included_in_sale">Cualitec cobra el envío</option></select></label><label>Cargo de envío<input name="shippingAmount" type="number" min="0" step="0.01" value="0" required></label><label>Garantía (días)<input name="warrantyDays" type="number" min="0" step="1" value="30" required></label><label>Guía DAC<input name="trackingCode" placeholder="Opcional"></label><label class="wide">Notas<textarea name="notes" rows="2" placeholder="Dirección, acuerdos, preferencias..."></textarea></label><p class="form-hint wide">Descuento y cargo de envío se ingresan manualmente. Por defecto, el destinatario paga el envío al recibir y no se suma a la venta.</p><div class="form-actions"><button class="primary" ${state.products.length ? "" : "disabled"}>Guardar pedido</button><button id="clear-order" class="secondary" type="button">Limpiar</button></div></form>`;
   const table = state.orders.length ? rows(["Cliente", "Productos", "Canal", "Estado", "Total / saldo", "Entrega", "Acciones"], [...state.orders].reverse().map(item => `<tr><td><strong>${esc(item.customerName)}</strong><small>${esc(item.contact)}</small></td><td>${item.lines.map(line => `${esc(productName(line.productId))} × ${line.quantity}`).join("<br>")}</td><td>${esc(item.channel)}</td><td>${badge(orderStatuses[item.status])}</td><td>${money(orderTotal(item))}<small>${item.status === "cancelled" ? `A devolver ${money(paidAmount(state, item.id))}` : `Cobrado ${money(paidAmount(state, item.id))} · Saldo ${money(orderTotal(item) - paidAmount(state, item.id))}`}</small></td><td>${item.deliveryMethod === "dac" ? "DAC" : "Montevideo"}<small>${esc(item.deliveryDate || "Sin fecha")}${item.trackingCode ? ` · ${esc(item.trackingCode)}` : ""}</small></td><td><div class="row-actions">${item.status !== "delivered" ? `<button class="text-button" data-edit-order="${esc(item.id)}">Editar</button>` : ""}${!["delivered", "cancelled"].includes(item.status) ? `<button class="text-button" data-deliver="${esc(item.id)}">Entregar</button>` : ""}</div></td></tr>`).join("")) : empty("Registrá consultas o pedidos que llegan por redes.");
   const paymentForm = `<form id="payment-form" class="form-grid"><label>Pedido<select name="orderId" required>${state.orders.map(item => option(item.id, `${item.customerName} · ${money(orderTotal(item))}`)).join("")}</select></label><label>Movimiento<select name="kind"><option value="payment">Cobro</option><option value="refund">Devolución de dinero</option></select></label><label>Importe<input name="amount" type="number" min="0.01" step="0.01" required></label><label>Medio de pago<select name="method">${Object.entries(paymentMethods).map(([key, value]) => option(key, value)).join("")}</select></label><label>Fecha<input name="date" type="date" value="${date()}" required></label><label>Referencia / nota<input name="note" placeholder="Opcional"></label><div class="form-actions"><button class="primary" ${state.orders.length ? "" : "disabled"}>Registrar movimiento</button></div></form>`;
   const legacyDeposits = state.orders.filter(item => Number(item.deposit || 0) > 0).map(item => ({ id: `legacy_${item.id}`, orderId: item.id, date: item.createdAt?.slice(0, 10) || "—", amount: Number(item.deposit), kind: "payment", method: "Seña anterior", note: "Registrada antes del historial de pagos" }));
@@ -104,12 +106,19 @@ function dataView() {
   if (!isCloudConfigured()) account = `<p>La nube de Cualitec todavía no está configurada. Los datos se guardan en este navegador.</p>`;
   else if (!session) account = `<p>Iniciá sesión para sincronizar datos entre dispositivos.</p><form id="login-form" class="form-grid"><label>Correo electrónico<input name="email" type="email" autocomplete="username" required></label><label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label><div class="form-actions"><button class="primary">Ingresar</button></div></form>`;
   else account = `<p>Cuenta: <strong>${esc(session.user.email)}</strong></p><p>${cloudEnabled ? "Sincronización activa" : cloudPending ? "Los datos locales difieren de los de la nube. Descargá un respaldo antes de cargar la versión remota." : "Datos locales pendientes de subir a la nube."}</p><div class="form-actions">${cloudPending ? `<button id="load-cloud" class="secondary">Cargar datos de la nube</button>` : !cloudEnabled ? `<button id="upload-local" class="primary">Subir datos locales</button>` : `<button id="check-cloud" class="secondary">Probar sincronización</button>`}<button id="logout" class="secondary">Cerrar sesión</button></div>${cloudCheck ? `<p>${esc(cloudCheck)}</p>` : ""}<form id="password-form" class="form-grid"><label>Nueva contraseña<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><label>Repetir contraseña<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label><div class="form-actions"><button class="secondary">Guardar contraseña</button></div></form>`;
-  return `<div class="grid two">${section("Respaldo", `<p>Descargá una copia de tus datos o restaurá un respaldo de Cualitec.</p><div class="form-actions"><button id="export" class="primary">Descargar respaldo</button><label class="file-button">Importar respaldo<input id="import" type="file" accept="application/json,.json" hidden></label></div>`)}${section("Cuenta y almacenamiento", account)}</div>`;
+  const history = !session || !historyAvailable ? "" : section("Historial de recuperación", `<p>Las últimas 50 versiones sincronizadas se guardan en Supabase. Podés recuperar una anterior si cometés un error.</p><div class="form-actions"><button id="refresh-history" class="secondary">Actualizar historial</button></div>${historyStatus ? `<p>${esc(historyStatus)}</p>` : ""}${historySnapshots.length ? rows(["Versión", "Guardada", ""], historySnapshots.map(item => `<tr><td>${item.revision}</td><td>${esc(new Intl.DateTimeFormat("es-UY", { dateStyle: "short", timeStyle: "short" }).format(new Date(item.created_at)))}</td><td><button class="text-button" data-restore-revision="${item.revision}" ${item.revision === cloudRevision || !cloudEnabled ? "disabled" : ""}>Recuperar</button></td></tr>`).join("")) : empty("Todavía no hay versiones disponibles.")}`);
+  return `<div class="grid two">${section("Respaldo", `<p>Descargá una copia de tus datos o restaurá un respaldo de Cualitec.</p><div class="form-actions"><button id="export" class="primary">Descargar respaldo</button><label class="file-button">Importar respaldo<input id="import" type="file" accept="application/json,.json" hidden></label></div>`)}${section("Cuenta y almacenamiento", account)}</div>${history}`;
+}
+
+async function refreshHistory() {
+  try { historySnapshots = await listCloudHistory(); historyStatus = ""; historyAvailable = true; }
+  catch (error) { historySnapshots = []; historyStatus = `No se pudo cargar el historial: ${error.message}`; historyAvailable = false; }
+  if (view === "data") render();
 }
 
 async function connectCloud() {
   session = await getSession();
-  if (!session) { cloudEnabled = false; cloudPending = null; render(); return; }
+  if (!session) { cloudEnabled = false; cloudPending = null; historySnapshots = []; historyStatus = ""; historyAvailable = false; render(); return; }
   const remote = await readCloud();
   cloudRevision = Number(remote?.revision || 0);
   if (remote && canonical(normalizeState(remote.data)) !== canonical(state)) {
@@ -118,6 +127,7 @@ async function connectCloud() {
     cloudPending = null; cloudEnabled = false;
   } else { cloudPending = null; cloudEnabled = true; }
   render();
+  refreshHistory();
 }
 
 function render() {
@@ -138,6 +148,20 @@ function syncOrderControls(form, clearInactive = false) {
   form.elements.shippingAmount.disabled = shipping;
 }
 
+function addOrderProductByCode() {
+  const input = document.querySelector("#order-code"), product = findProductByCode(state.products, input.value);
+  if (!product) { toast("No se encontró un producto con ese código. Revisá el catálogo."); input.focus(); return; }
+  const container = document.querySelector("#order-lines");
+  const existing = [...container.querySelectorAll(".order-line")].find(row => row.querySelector('[name="productId"]').value === product.id && !row.hasAttribute("data-pristine"));
+  if (existing) existing.querySelector('[name="quantity"]').value = Number(existing.querySelector('[name="quantity"]').value || 0) + 1;
+  else {
+    const pristine = container.querySelector('[data-pristine="true"]');
+    if (pristine) pristine.outerHTML = orderLine({ productId: product.id, quantity: 1, unitPrice: product.price });
+    else container.insertAdjacentHTML("beforeend", orderLine({ productId: product.id, quantity: 1, unitPrice: product.price }));
+  }
+  input.value = ""; input.focus(); toast(`${product.name}${product.variant ? ` · ${product.variant}` : ""} agregado al pedido.`);
+}
+
 document.addEventListener("click", event => {
   const target = event.target.closest("button"); if (!target) return;
   if (target.dataset.view) { view = target.dataset.view; render(); document.querySelector(".sidebar").classList.remove("open"); }
@@ -156,6 +180,7 @@ document.addEventListener("click", event => {
     form.scrollIntoView({ behavior: "smooth" });
   }
   if (target.id === "add-line") document.querySelector("#order-lines").insertAdjacentHTML("beforeend", orderLine());
+  if (target.id === "add-by-code") addOrderProductByCode();
   if (target.classList.contains("remove-line")) { const container = target.closest("#order-lines"); if (container.children.length > 1) target.closest(".order-line").remove(); else toast("El pedido necesita al menos un producto."); }
   if (target.id === "clear-order") { const form = document.querySelector("#order-form"); form.reset(); form.elements.id.value = ""; form.querySelector("#order-lines").innerHTML = state.products.length ? orderLine() : ""; syncOrderControls(form, true); }
   if (target.id === "clear-sales-filters") { salesFilters = { from: "", to: "", channel: "" }; render(); }
@@ -174,16 +199,30 @@ document.addEventListener("click", event => {
     const blob = new Blob([JSON.stringify({ application: "Cualitec Gestión", version: 1, exportedAt: new Date().toISOString(), data: state }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob), link = document.createElement("a"); link.href = url; link.download = `cualitec-respaldo-${date()}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  if (target.id === "refresh-history") refreshHistory();
+  if (target.dataset.restoreRevision) {
+    const revision = Number(target.dataset.restoreRevision);
+    if (!cloudEnabled || !historySnapshots.some(item => item.revision === revision)) { toast("Esa versión ya no está disponible."); return; }
+    if (!confirm(`Se recuperará la versión ${revision} y reemplazará los datos actuales. El estado actual quedará en el historial. ¿Continuar?`)) return;
+    saveQueue.then(async () => {
+      const snapshot = normalizeState(await readCloudRevision(revision));
+      const nextRevision = await writeCloud(snapshot, cloudRevision);
+      state = snapshot; cloudRevision = nextRevision; cloudPending = null; cloudEnabled = true;
+      localStorage.setItem(KEY, JSON.stringify(state));
+      await refreshHistory(); render(); toast("Versión recuperada y sincronizada.");
+    }).catch(error => toast(`No se pudo recuperar: ${error.message}`));
+  }
   if (target.id === "logout") signOut().then(() => { session = null; cloudEnabled = false; cloudPending = null; render(); }).catch(error => toast(error.message));
   if (target.id === "load-cloud" && cloudPending && confirm("Los datos locales se reemplazarán por la versión de Supabase. Descargá un respaldo antes de continuar. ¿Cargar?")) {
     state = cloudPending; localStorage.setItem(KEY, JSON.stringify(state)); cloudPending = null; cloudEnabled = true; render();
   }
-  if (target.id === "upload-local") writeCloud(state, cloudRevision).then(revision => { cloudRevision = revision; cloudEnabled = true; render(); toast("Datos subidos a Supabase."); }).catch(error => toast(error.message));
+  if (target.id === "upload-local") writeCloud(state, cloudRevision).then(revision => { cloudRevision = revision; cloudEnabled = true; refreshHistory(); render(); toast("Datos subidos a Supabase."); }).catch(error => toast(error.message));
   if (target.id === "check-cloud") {
     target.disabled = true;
     saveQueue = saveQueue.then(async () => {
       const snapshot = structuredClone(state);
       cloudRevision = await writeCloud(snapshot, cloudRevision);
+      await refreshHistory();
       const saved = await readCloud();
       if (Number(saved?.revision) !== cloudRevision || canonical(normalizeState(saved.data)) !== canonical(snapshot)) throw new Error("Los datos leídos no coinciden con los guardados.");
       cloudCheck = "Prueba correcta: Supabase guardó y devolvió los datos actuales.";
@@ -220,8 +259,9 @@ document.addEventListener("submit", async event => {
       const previous = state.products.find(item => item.id === data.id);
       const product = { id: data.id || id("product"), name: data.name.trim(), category: data.category.trim(), variant: data.variant.trim(), barcode: data.barcode.trim(), sku: data.sku.trim(), price: Number(data.price), minStock: Number(data.minStock), stock: Number(previous?.stock || 0), averageCost: Number(previous?.averageCost || 0) };
       if (!product.name || product.price < 0 || !Number.isFinite(product.price) || !Number.isInteger(product.minStock) || product.minStock < 0) throw new Error("Revisá los datos del producto.");
-      if (product.barcode && state.products.some(item => item.id !== product.id && item.barcode === product.barcode)) throw new Error("Ese código de barras ya está asignado a otro producto.");
-      if (product.sku && state.products.some(item => item.id !== product.id && (item.sku || "").toLowerCase() === product.sku.toLowerCase())) throw new Error("Ese SKU ya está asignado a otra variante.");
+      const otherProducts = state.products.filter(item => item.id !== product.id);
+      if (product.barcode && findProductByCode(otherProducts, product.barcode)) throw new Error("Ese código ya está asignado a otro producto.");
+      if (product.sku && findProductByCode(otherProducts, product.sku)) throw new Error("Ese SKU ya está asignado a otra variante.");
       if (state.products.some(item => item.id !== product.id && item.name.trim().toLowerCase() === product.name.toLowerCase() && (item.variant || "").trim().toLowerCase() === product.variant.toLowerCase())) throw new Error("Ese producto y variante ya existen.");
       persist({ ...state, products: previous ? state.products.map(item => item.id === previous.id ? product : item) : [...state.products, product] });
     } else if (formId === "purchase-form") persist(addPurchase(state, { id: id("purchase"), ...data }));
@@ -239,6 +279,7 @@ document.addEventListener("submit", async event => {
 });
 
 document.addEventListener("change", async event => {
+  if (event.target.closest(".order-line")) event.target.closest(".order-line").removeAttribute("data-pristine");
   if (["discountType", "shippingPayer"].includes(event.target.name) && event.target.closest("#order-form")) syncOrderControls(event.target.form, true);
   if (event.target.id === "import") {
     try {
@@ -252,6 +293,18 @@ document.addEventListener("change", async event => {
     const product = state.products.find(item => item.id === event.target.value);
     if (product) event.target.closest(".order-line").querySelector('[name="unitPrice"]').value = product.price;
   }
+});
+document.addEventListener("input", event => {
+  if (event.target.closest(".order-line")) event.target.closest(".order-line").removeAttribute("data-pristine");
+  if (event.target.id === "product-search") {
+    const query = event.target.value.trim().toLowerCase();
+    const rows = [...document.querySelectorAll("[data-product-row]")];
+    rows.forEach(row => { row.hidden = !row.dataset.search.includes(query); });
+    document.querySelector("#product-search-empty").hidden = rows.some(row => !row.hidden);
+  }
+});
+document.addEventListener("keydown", event => {
+  if (event.target.id === "order-code" && event.key === "Enter") { event.preventDefault(); addOrderProductByCode(); }
 });
 render();
 connectCloud().catch(error => toast(`No se pudo consultar Supabase: ${error.message}`));

@@ -27,6 +27,11 @@ export function availableQuantity(state, productId, exceptOrderId = null) {
   return Number(product?.stock || 0) - reservedQuantity(state, productId, exceptOrderId);
 }
 
+export function findProductByCode(products, code) {
+  const needle = String(code || "").trim().toLowerCase();
+  return needle ? products.find(item => [item.barcode, item.sku].some(value => String(value || "").trim().toLowerCase() === needle)) : undefined;
+}
+
 export function addPurchase(state, purchase) {
   const product = state.products.find(item => item.id === purchase.productId);
   const quantity = Number(purchase.quantity), unitCost = Number(purchase.unitCost);

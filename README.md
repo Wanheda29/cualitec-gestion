@@ -5,6 +5,7 @@ Panel interno para un emprendimiento que vende tecnología por Instagram, WhatsA
 ## Funciones actuales
 
 - Catálogo de variantes (color o capacidad), cada una con código de barras, SKU, precio, costo promedio, stock y mínimo de reposición.
+- Búsqueda por nombre, código de barras o SKU. En un pedido, escribir o escanear el código agrega la variante; repetirlo aumenta la cantidad. Un lector que funciona como teclado sirve sin cámara.
 - Registro de compras y ajustes de stock con motivo.
 - Pedidos con varios productos como consulta, reserva de stock o encargo sin stock. Una entrega descuenta unidades y crea una venta una sola vez.
 - Descuentos manuales por importe fijo o porcentaje. Se pueden agregar al pedido antes de entregarlo; no se aplican automáticamente.
@@ -20,7 +21,7 @@ Requiere Node.js 20 o posterior. Ejecutar `npm run serve` y abrir `http://localh
 
 ## Sincronización
 
-La aplicación guarda una copia local en `localStorage` y se conecta al proyecto Supabase exclusivo de Cualitec configurado en `cloud-config.js`. El esquema de [`supabase/schema.sql`](supabase/schema.sql) ya fue aplicado. La cuenta administradora está activada. En **Datos y respaldo**, el botón **Probar sincronización** comprueba que Supabase guarde y devuelva el estado actual sin crear registros de ejemplo. La sincronización entre dispositivos usa la misma cuenta; si hay datos distintos, la aplicación pide elegir qué versión conservar.
+La aplicación guarda una copia local en `localStorage` y se conecta al proyecto Supabase exclusivo de Cualitec configurado en `cloud-config.js`. El esquema de [`supabase/schema.sql`](supabase/schema.sql) ya fue aplicado. La migración [`supabase/history.sql`](supabase/history.sql) agrega un historial de las 50 últimas versiones sincronizadas y una opción para recuperar una versión anterior. La cuenta administradora está activada. En **Datos y respaldo**, el botón **Probar sincronización** comprueba que Supabase guarde y devuelva el estado actual sin crear registros de ejemplo. La sincronización entre dispositivos usa la misma cuenta; si hay datos distintos, la aplicación pide elegir qué versión conservar.
 
 No se importa ni se conecta a la base de Dulce Gestión.
 
