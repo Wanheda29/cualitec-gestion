@@ -1,5 +1,6 @@
 import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary } from "./domain.js";
 import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readCloud, writeCloud } from "./cloud.js";
+import { salesReportCsv } from "./reports.js";
 
 const KEY = "cualitec-gestion-v1";
 let state;
@@ -72,8 +73,10 @@ function customers() {
   return section("Clientes registrados en pedidos", map.size ? rows(["Cliente", "Contacto", "Pedidos", "Ventas entregadas"], [...map.values()].map(item => `<tr><td>${esc(item.name)}</td><td>${esc(item.contact)}</td><td>${item.count}</td><td>${money(item.spent)}</td></tr>`).join("")) : empty("Los clientes aparecerán al registrar pedidos."));
 }
 
+const filteredSales = () => state.sales.filter(item => (!salesFilters.from || item.date >= salesFilters.from) && (!salesFilters.to || item.date <= salesFilters.to) && (!salesFilters.channel || item.channel === salesFilters.channel));
+
 function sales() {
-  const filtered = state.sales.filter(item => (!salesFilters.from || item.date >= salesFilters.from) && (!salesFilters.to || item.date <= salesFilters.to) && (!salesFilters.channel || item.channel === salesFilters.channel));
+  const filtered = filteredSales();
   const totals = filtered.reduce((result, sale) => {
     result.revenue += Number(sale.total); result.shipping += Number(sale.shippingAmount || 0); result.discount += Number(sale.discount || 0);
     result.cost += sale.lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitCost), 0);
@@ -90,7 +93,7 @@ function sales() {
       products.set(key, current);
     }
   }
-  const filterForm = `<form id="sales-filter-form" class="form-grid"><label>Desde<input name="from" type="date" value="${esc(salesFilters.from)}"></label><label>Hasta<input name="to" type="date" value="${esc(salesFilters.to)}"></label><label>Canal<select name="channel">${option("", "Todos los canales", !salesFilters.channel)}${[...new Set(state.sales.map(item => item.channel))].map(item => option(item, item, item === salesFilters.channel)).join("")}</select></label><div class="form-actions"><button class="primary">Aplicar filtros</button><button id="clear-sales-filters" type="button" class="secondary">Limpiar</button></div></form>`;
+  const filterForm = `<form id="sales-filter-form" class="form-grid"><label>Desde<input name="from" type="date" value="${esc(salesFilters.from)}"></label><label>Hasta<input name="to" type="date" value="${esc(salesFilters.to)}"></label><label>Canal<select name="channel">${option("", "Todos los canales", !salesFilters.channel)}${[...new Set(state.sales.map(item => item.channel))].map(item => option(item, item, item === salesFilters.channel)).join("")}</select></label><div class="form-actions"><button class="primary">Aplicar filtros</button><button id="clear-sales-filters" type="button" class="secondary">Limpiar</button><button id="export-sales" type="button" class="secondary" ${filtered.length ? "" : "disabled"}>Descargar CSV</button></div></form>`;
   const table = filtered.length ? rows(["Fecha", "Venta", "Cliente", "Canal", "Productos", "Descuento", "Envío", "Total", "Saldo", ""], [...filtered].reverse().map(item => `<tr><td>${esc(item.date)}</td><td>${esc(item.receiptNumber || `A${String(state.sales.indexOf(item) + 1).padStart(3, "0")}`)}</td><td>${esc(item.customerName)}</td><td>${esc(item.channel)}</td><td>${item.lines.map(line => `${esc(line.productName)} × ${line.quantity}`).join("<br>")}</td><td>${money(item.discount || 0)}</td><td>${money(item.shippingAmount || 0)}</td><td>${money(item.total)}</td><td>${money(item.total - paidAmount(state, item.orderId))}</td><td><button class="text-button" data-receipt="${esc(item.id)}">Comprobante</button></td></tr>`).join("")) : empty("No hay ventas para los filtros elegidos.");
   const productTable = products.size ? rows(["Producto", "Unidades", "Venta neta", "Costo", "Margen"], [...products.values()].sort((a, b) => b.revenue - a.revenue).map(item => `<tr><td>${esc(item.name)}</td><td>${item.quantity}</td><td>${money(item.revenue)}</td><td>${money(item.cost)}</td><td>${money(item.revenue - item.cost)}</td></tr>`).join("")) : empty("Sin productos vendidos en este período.");
   return `${section("Filtrar ventas", filterForm)}<div class="stats"><article><span>Ventas</span><strong>${filtered.length}</strong><small>Total ${money(totals.revenue)}</small></article><article><span>Margen de productos</span><strong>${money(totals.revenue - totals.shipping - totals.cost)}</strong><small>Sin cargo de envío ni costo de mercadería</small></article><article><span>Descuentos</span><strong>${money(totals.discount)}</strong><small>Aplicados manualmente</small></article><article><span>Por cobrar</span><strong>${money(totals.outstanding)}</strong><small>De las ventas filtradas</small></article></div>${section("Ventas realizadas", table)}${section("Productos vendidos", productTable)}`;
@@ -156,6 +159,13 @@ document.addEventListener("click", event => {
   if (target.classList.contains("remove-line")) { const container = target.closest("#order-lines"); if (container.children.length > 1) target.closest(".order-line").remove(); else toast("El pedido necesita al menos un producto."); }
   if (target.id === "clear-order") { const form = document.querySelector("#order-form"); form.reset(); form.elements.id.value = ""; form.querySelector("#order-lines").innerHTML = state.products.length ? orderLine() : ""; syncOrderControls(form, true); }
   if (target.id === "clear-sales-filters") { salesFilters = { from: "", to: "", channel: "" }; render(); }
+  if (target.id === "export-sales") {
+    const report = salesReportCsv(state, filteredSales());
+    const blob = new Blob(["\ufeff", report], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob), link = document.createElement("a");
+    link.href = url; link.download = `cualitec-ventas-${salesFilters.from || "inicio"}-${salesFilters.to || "hoy"}.csv`;
+    link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
   if (target.dataset.receipt) window.open(`receipt.html?sale=${encodeURIComponent(target.dataset.receipt)}`, "_blank", "noopener");
   if (target.dataset.deliver) {
     try { const next = deliverOrder(state, target.dataset.deliver, date()); persist(next); window.open(`receipt.html?sale=${encodeURIComponent(next.sales.at(-1).id)}`, "_blank", "noopener"); toast("Venta registrada. El comprobante está disponible en Ventas."); } catch (error) { toast(error.message); }

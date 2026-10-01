@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyState, normalizeState, addPurchase, saveOrder, availableQuantity, deliverOrder, orderTotal, monthlySummary, paidAmount, recordPayment } from "../domain.js";
+import { salesReportCsv } from "../reports.js";
 
 const product = { id: "p1", name: "Auriculares", stock: 0, averageCost: 0, price: 1000 };
 const order = (id, status, quantity) => ({ id, customerName: "Ana", contact: "@ana", channel: "Instagram", status, deposit: 0, lines: [{ productId: "p1", quantity, unitPrice: 1000 }] });
@@ -82,5 +83,16 @@ test("aplica solo el descuento ingresado y conserva importes en la venta", () =>
   assert.equal(delivered.sales[0].receiptNumber, "A001");
   assert.deepEqual(monthlySummary(delivered, "2026-10"), { sales: 1, revenue: 2000, shipping: 200, discount: 200, cost: 1200 });
   assert.throws(() => saveOrder(initial, { ...discounted, discountValue: 101 }), /descuento/);
+});
+
+test("el CSV de ventas respeta el filtro recibido y protege los datos de clientes", () => {
+  const base = { ...structuredClone(emptyState), products: [{ ...product, stock: 1, averageCost: 600 }] };
+  const saved = saveOrder(base, { ...order("o1", "reserved", 1), customerName: '=SUM(1;2)', discountType: "amount", discountValue: 100 });
+  const delivered = deliverOrder(saved, "o1", "2026-10-01");
+  const csv = salesReportCsv(delivered, delivered.sales);
+  assert.match(csv, /"'=?SUM\(1;2\)"/);
+  assert.match(csv, /"900,00"/);
+  assert.match(csv, /"300,00"/);
+  assert.equal(salesReportCsv(delivered, []).trim().split("\n").length, 1);
 });
 
