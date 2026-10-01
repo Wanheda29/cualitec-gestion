@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyState, normalizeState, addPurchase, saveOrder, availableQuantity, deliverOrder, monthlySummary, paidAmount, recordPayment } from "../domain.js";
+import { emptyState, normalizeState, addPurchase, saveOrder, availableQuantity, deliverOrder, orderTotal, monthlySummary, paidAmount, recordPayment } from "../domain.js";
 
 const product = { id: "p1", name: "Auriculares", stock: 0, averageCost: 0, price: 1000 };
 const order = (id, status, quantity) => ({ id, customerName: "Ana", contact: "@ana", channel: "Instagram", status, deposit: 0, lines: [{ productId: "p1", quantity, unitPrice: 1000 }] });
@@ -28,7 +28,7 @@ test("un pedido por encargo se entrega al ingresar stock y crea una sola venta",
   const delivered = deliverOrder(stocked, "o1", "2026-09-28");
   assert.equal(delivered.products[0].stock, 0);
   assert.equal(delivered.sales.length, 1);
-  assert.deepEqual(monthlySummary(delivered, "2026-09"), { sales: 1, revenue: 1000, cost: 600 });
+  assert.deepEqual(monthlySummary(delivered, "2026-09"), { sales: 1, revenue: 1000, shipping: 0, discount: 0, cost: 600 });
   assert.throws(() => deliverOrder(delivered, "o1", "2026-09-28"), /nuevamente/);
 });
 
@@ -67,5 +67,20 @@ test("un respaldo antiguo conserva la seña y acepta nuevos pagos", () => {
   assert.equal(paidAmount(restored, "o1"), 200);
   const paid = recordPayment(restored, { id: "pay1", orderId: "o1", kind: "payment", amount: 300, method: "cash", date: "2026-10-01" });
   assert.equal(paidAmount(paid, "o1"), 500);
+});
+
+test("aplica solo el descuento ingresado y conserva importes en la venta", () => {
+  const initial = { ...structuredClone(emptyState), products: [{ ...product, stock: 2, averageCost: 600 }] };
+  const discounted = { ...order("o1", "reserved", 2), discountType: "percent", discountValue: 10, shippingPayer: "included_in_sale", shippingAmount: 200, warrantyDays: 30 };
+  const saved = saveOrder(initial, discounted);
+  assert.equal(orderTotal(saved.orders[0]), 2000);
+  const delivered = deliverOrder(saved, "o1", "2026-10-01");
+  assert.equal(delivered.sales[0].subtotal, 2000);
+  assert.equal(delivered.sales[0].discount, 200);
+  assert.equal(delivered.sales[0].shippingAmount, 200);
+  assert.equal(delivered.sales[0].total, 2000);
+  assert.equal(delivered.sales[0].receiptNumber, "A001");
+  assert.deepEqual(monthlySummary(delivered, "2026-10"), { sales: 1, revenue: 2000, shipping: 200, discount: 200, cost: 1200 });
+  assert.throws(() => saveOrder(initial, { ...discounted, discountValue: 101 }), /descuento/);
 });
 

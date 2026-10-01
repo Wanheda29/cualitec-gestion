@@ -1,6 +1,8 @@
 export const emptyState = { products: [], purchases: [], orders: [], sales: [], stockAdjustments: [], payments: [] };
 export const orderStatuses = { inquiry: "Consulta", reserved: "Reservado", requested: "Por encargo", ready: "Listo para entregar", delivered: "Entregado", cancelled: "Cancelado" };
 export const paymentMethods = { transfer: "Transferencia", cash: "Efectivo", card: "Tarjeta", mercadopago: "Mercado Pago", other: "Otro" };
+export const discountTypes = { none: "Sin descuento", amount: "Importe fijo", percent: "Porcentaje" };
+const moneyRound = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
 export function normalizeState(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Los datos no son válidos.");
@@ -53,13 +55,22 @@ export function saveOrder(state, order) {
     if (["reserved", "ready"].includes(order.status) && Number(line.quantity) > availableQuantity(state, line.productId, order.id)) throw new Error("No hay stock disponible para reservar esa cantidad.");
   }
   if (!Object.hasOwn(orderStatuses, order.status)) throw new Error("El estado del pedido no es válido.");
+  const discountType = order.discountType || "none", discountValue = Number(order.discountValue || 0), shippingAmount = Number(order.shippingAmount || 0);
+  if (!Object.hasOwn(discountTypes, discountType) || !Number.isFinite(discountValue) || discountValue < 0 || (discountType === "percent" && discountValue > 100) || (discountType === "amount" && discountValue > orderSubtotal(order)) || (discountType === "none" && discountValue !== 0)) throw new Error("Revisá el descuento manual.");
+  if (!Number.isFinite(shippingAmount) || shippingAmount < 0 || (order.shippingPayer !== "included_in_sale" && shippingAmount !== 0)) throw new Error("Revisá el cargo de envío.");
+  if (!Number.isInteger(Number(order.warrantyDays ?? 30)) || Number(order.warrantyDays ?? 30) < 0) throw new Error("Revisá los días de garantía.");
   const previous = state.orders.find(item => item.id === order.id);
   const paid = paidAmount(state, order.id) - Number(previous?.deposit || 0) + Number(order.deposit || 0);
   if (!Number.isFinite(paid) || paid < 0 || paid > orderTotal(order)) throw new Error("Los pagos superan el total del pedido.");
   return { ...state, orders: previous ? state.orders.map(item => item.id === order.id ? order : item) : [...state.orders, order] };
 }
 
-export function orderTotal(order) { return (order.lines || []).reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitPrice), 0); }
+export function orderSubtotal(order) { return moneyRound((order.lines || []).reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitPrice), 0)); }
+export function discountAmount(order) {
+  const value = Number(order.discountValue || 0), subtotal = orderSubtotal(order);
+  return moneyRound(order.discountType === "percent" ? subtotal * value / 100 : order.discountType === "amount" ? value : 0);
+}
+export function orderTotal(order) { return moneyRound(orderSubtotal(order) - discountAmount(order) + (order.shippingPayer === "included_in_sale" ? Number(order.shippingAmount || 0) : 0)); }
 
 export function paidAmount(state, orderId) {
   const order = state.orders.find(item => item.id === orderId);
@@ -88,15 +99,18 @@ export function deliverOrder(state, orderId, date) {
     saleLines.push({ ...line, productName: `${product.name}${product.variant ? ` · ${product.variant}` : ""}`, unitCost: Number(product.averageCost || 0) });
     product.stock -= Number(line.quantity);
   }
-  const sale = { id: `sale_${crypto.randomUUID()}`, orderId, customerName: order.customerName, channel: order.channel, date, lines: saleLines, total: orderTotal(order) };
+  const nextNumber = Math.max(state.sales.length, ...state.sales.map(item => Number(item.receiptNumber?.match(/\d+$/)?.[0] || 0))) + 1;
+  const sale = { id: `sale_${crypto.randomUUID()}`, receiptNumber: `A${String(nextNumber).padStart(3, "0")}`, orderId, customerName: order.customerName, contact: order.contact, channel: order.channel, date, lines: saleLines, subtotal: orderSubtotal(order), discountType: order.discountType || "none", discountValue: Number(order.discountValue || 0), discount: discountAmount(order), shippingAmount: order.shippingPayer === "included_in_sale" ? Number(order.shippingAmount || 0) : 0, warrantyDays: Number(order.warrantyDays ?? 30), total: orderTotal(order) };
   return { ...state, products, orders: state.orders.map(item => item.id === orderId ? { ...item, status: "delivered", deliveredAt: date } : item), sales: [...state.sales, sale] };
 }
 
 export function monthlySummary(state, month) {
   return state.sales.filter(sale => sale.date.startsWith(month)).reduce((summary, sale) => {
     summary.sales += 1; summary.revenue += Number(sale.total);
+    summary.shipping += Number(sale.shippingAmount || 0);
+    summary.discount += Number(sale.discount || 0);
     summary.cost += sale.lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitCost), 0);
     return summary;
-  }, { sales: 0, revenue: 0, cost: 0 });
+  }, { sales: 0, revenue: 0, shipping: 0, discount: 0, cost: 0 });
 }
 

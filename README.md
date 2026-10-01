@@ -7,9 +7,11 @@ Panel interno para un emprendimiento que vende tecnología por Instagram, WhatsA
 - Catálogo de variantes (color o capacidad), cada una con código de barras, SKU, precio, costo promedio, stock y mínimo de reposición.
 - Registro de compras y ajustes de stock con motivo.
 - Pedidos con varios productos como consulta, reserva de stock o encargo sin stock. Una entrega descuenta unidades y crea una venta una sola vez.
+- Descuentos manuales por importe fijo o porcentaje. Se pueden agregar al pedido antes de entregarlo; no se aplican automáticamente.
 - Cobros parciales y devoluciones con fecha, medio de pago e historial. El saldo se calcula por pedido; las señas registradas antes de esta actualización se conservan.
-- Entrega en el día en Montevideo o por DAC al interior, con envío pagado por el destinatario al recibir.
-- Clientes derivados de pedidos, ventas e informe mensual de facturación, costo y ganancia bruta.
+- Entrega en el día en Montevideo o por DAC al interior. Por defecto, el destinatario paga el envío al recibir; también se puede cargar un envío cobrado por Cualitec.
+- Clientes derivados de pedidos e informes de ventas con filtros por rango de fechas y canal, descuentos, saldo pendiente y resultados por producto.
+- Comprobante de venta en formato A4 basado en el ejemplo de Cualitec. Se abre al entregar un pedido y se puede volver a abrir desde **Ventas** para imprimirlo o guardarlo como PDF desde el navegador. Es un comprobante comercial, no una factura fiscal electrónica.
 - Respaldo e importación en JSON propios de Cualitec.
 
 ## Ejecutar

@@ -1,4 +1,4 @@
-import { emptyState, normalizeState, orderStatuses, paymentMethods, availableQuantity, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary } from "./domain.js";
+import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary } from "./domain.js";
 import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readCloud, writeCloud } from "./cloud.js";
 
 const KEY = "cualitec-gestion-v1";
@@ -8,9 +8,10 @@ catch { state = structuredClone(emptyState); }
 let view = "dashboard";
 let session = null, cloudRevision = 0, cloudEnabled = false, cloudPending = null;
 let cloudCheck = "";
+let salesFilters = { from: "", to: "", channel: "" };
 let saveQueue = Promise.resolve();
 const app = document.querySelector("#app");
-const money = value => new Intl.NumberFormat("es-UY", { style: "currency", currency: "UYU", maximumFractionDigits: 0 }).format(Number(value || 0));
+const money = value => new Intl.NumberFormat("es-UY", { style: "currency", currency: "UYU", maximumFractionDigits: 2 }).format(Number(value || 0));
 const date = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
 const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -37,7 +38,7 @@ function dashboard() {
   const pending = state.orders.filter(item => !["delivered", "cancelled"].includes(item.status));
   const low = state.products.filter(item => Number(item.stock) <= Number(item.minStock || 0));
   return `<div class="hero"><div><span class="eyebrow">TU NEGOCIO EN UN VISTAZO</span><h2>Vendé con claridad.<br><em>Gestioná con control.</em></h2><p>Stock, pedidos de redes sociales y resultados, en un mismo lugar.</p></div><button class="primary" data-view="orders">Nuevo pedido →</button></div>
-    <div class="stats"><article><span>Ventas del mes</span><strong>${money(summary.revenue)}</strong><small>${summary.sales} operaciones</small></article><article><span>Ganancia bruta</span><strong>${money(summary.revenue - summary.cost)}</strong><small>Ventas menos costo de mercadería</small></article><article><span>Pedidos activos</span><strong>${pending.length}</strong><small>Por atender o entregar</small></article><article><span>Productos con stock bajo</span><strong>${low.length}</strong><small>Según mínimo configurado</small></article></div>
+    <div class="stats"><article><span>Ventas del mes</span><strong>${money(summary.revenue)}</strong><small>${summary.sales} operaciones</small></article><article><span>Margen de productos</span><strong>${money(summary.revenue - summary.shipping - summary.cost)}</strong><small>Ventas sin envíos menos costo de mercadería</small></article><article><span>Pedidos activos</span><strong>${pending.length}</strong><small>Por atender o entregar</small></article><article><span>Productos con stock bajo</span><strong>${low.length}</strong><small>Según mínimo configurado</small></article></div>
     <div class="grid two">${section("Pedidos en curso", pending.length ? rows(["Cliente", "Productos", "Estado", "Entrega"], pending.slice(-5).reverse().map(item => `<tr><td>${esc(item.customerName)}</td><td>${item.lines.map(line => `${esc(productName(line.productId))} × ${line.quantity}`).join("<br>")}</td><td>${badge(orderStatuses[item.status])}</td><td>${esc(item.deliveryDate || "Sin fecha")}</td></tr>`).join("")) : empty("Todavía no hay pedidos activos."))}
     ${section("Reponer pronto", low.length ? rows(["Producto", "En stock", "Disponible"], low.map(item => `<tr><td>${esc(item.name)}</td><td>${item.stock}</td><td>${availableQuantity(state, item.id)}</td></tr>`).join("")) : empty("El inventario está por encima de los mínimos."))}</div>`;
 }
@@ -56,7 +57,7 @@ function purchases() {
 }
 
 function orders() {
-  const form = `<form id="order-form" class="form-grid"><input name="id" type="hidden"><label>Cliente<input name="customerName" required></label><label>Contacto / usuario de red<input name="contact" required placeholder="Teléfono o @usuario"></label><label>Canal<select name="channel">${["Instagram", "WhatsApp", "Facebook", "Otro"].map(x => option(x, x)).join("")}</select></label><label>Estado<select name="status">${Object.entries(orderStatuses).filter(([key]) => key !== "delivered").map(([key, value]) => option(key, value)).join("")}</select></label><div class="wide"><div id="order-lines" class="order-lines">${state.products.length ? orderLine() : ""}</div><button id="add-line" class="secondary" type="button" ${state.products.length ? "" : "disabled"}>Agregar producto</button></div><label>Entrega<select name="deliveryMethod"><option value="montevideo">Montevideo · en el día</option><option value="dac">Interior · DAC</option></select></label><label>Fecha prevista de entrega<input name="deliveryDate" type="date"></label><label>Guía DAC<input name="trackingCode" placeholder="Opcional"></label><label class="wide">Notas<textarea name="notes" rows="2" placeholder="Dirección, acuerdos, preferencias..."></textarea></label><p class="form-hint wide">El destinatario paga el envío al recibir. El costo de envío no se suma a la venta.</p><div class="form-actions"><button class="primary" ${state.products.length ? "" : "disabled"}>Guardar pedido</button><button id="clear-order" class="secondary" type="button">Limpiar</button></div></form>`;
+  const form = `<form id="order-form" class="form-grid"><input name="id" type="hidden"><label>Cliente<input name="customerName" required></label><label>Contacto / usuario de red<input name="contact" required placeholder="Teléfono o @usuario"></label><label>Canal<select name="channel">${["Instagram", "WhatsApp", "Facebook", "Otro"].map(x => option(x, x)).join("")}</select></label><label>Estado<select name="status">${Object.entries(orderStatuses).filter(([key]) => key !== "delivered").map(([key, value]) => option(key, value)).join("")}</select></label><div class="wide"><div id="order-lines" class="order-lines">${state.products.length ? orderLine() : ""}</div><button id="add-line" class="secondary" type="button" ${state.products.length ? "" : "disabled"}>Agregar producto</button></div><label>Descuento manual<select name="discountType">${Object.entries(discountTypes).map(([key, value]) => option(key, value)).join("")}</select></label><label>Valor del descuento<input name="discountValue" type="number" min="0" step="0.01" value="0" required></label><label>Entrega<select name="deliveryMethod"><option value="montevideo">Montevideo · en el día</option><option value="dac">Interior · DAC</option></select></label><label>Fecha prevista de entrega<input name="deliveryDate" type="date"></label><label>Envío<select name="shippingPayer"><option value="recipient_on_delivery">Destinatario paga al recibir</option><option value="included_in_sale">Cualitec cobra el envío</option></select></label><label>Cargo de envío<input name="shippingAmount" type="number" min="0" step="0.01" value="0" required></label><label>Garantía (días)<input name="warrantyDays" type="number" min="0" step="1" value="30" required></label><label>Guía DAC<input name="trackingCode" placeholder="Opcional"></label><label class="wide">Notas<textarea name="notes" rows="2" placeholder="Dirección, acuerdos, preferencias..."></textarea></label><p class="form-hint wide">Descuento y cargo de envío se ingresan manualmente. Por defecto, el destinatario paga el envío al recibir y no se suma a la venta.</p><div class="form-actions"><button class="primary" ${state.products.length ? "" : "disabled"}>Guardar pedido</button><button id="clear-order" class="secondary" type="button">Limpiar</button></div></form>`;
   const table = state.orders.length ? rows(["Cliente", "Productos", "Canal", "Estado", "Total / saldo", "Entrega", "Acciones"], [...state.orders].reverse().map(item => `<tr><td><strong>${esc(item.customerName)}</strong><small>${esc(item.contact)}</small></td><td>${item.lines.map(line => `${esc(productName(line.productId))} × ${line.quantity}`).join("<br>")}</td><td>${esc(item.channel)}</td><td>${badge(orderStatuses[item.status])}</td><td>${money(orderTotal(item))}<small>${item.status === "cancelled" ? `A devolver ${money(paidAmount(state, item.id))}` : `Cobrado ${money(paidAmount(state, item.id))} · Saldo ${money(orderTotal(item) - paidAmount(state, item.id))}`}</small></td><td>${item.deliveryMethod === "dac" ? "DAC" : "Montevideo"}<small>${esc(item.deliveryDate || "Sin fecha")}${item.trackingCode ? ` · ${esc(item.trackingCode)}` : ""}</small></td><td><div class="row-actions">${item.status !== "delivered" ? `<button class="text-button" data-edit-order="${esc(item.id)}">Editar</button>` : ""}${!["delivered", "cancelled"].includes(item.status) ? `<button class="text-button" data-deliver="${esc(item.id)}">Entregar</button>` : ""}</div></td></tr>`).join("")) : empty("Registrá consultas o pedidos que llegan por redes.");
   const paymentForm = `<form id="payment-form" class="form-grid"><label>Pedido<select name="orderId" required>${state.orders.map(item => option(item.id, `${item.customerName} · ${money(orderTotal(item))}`)).join("")}</select></label><label>Movimiento<select name="kind"><option value="payment">Cobro</option><option value="refund">Devolución de dinero</option></select></label><label>Importe<input name="amount" type="number" min="0.01" step="0.01" required></label><label>Medio de pago<select name="method">${Object.entries(paymentMethods).map(([key, value]) => option(key, value)).join("")}</select></label><label>Fecha<input name="date" type="date" value="${date()}" required></label><label>Referencia / nota<input name="note" placeholder="Opcional"></label><div class="form-actions"><button class="primary" ${state.orders.length ? "" : "disabled"}>Registrar movimiento</button></div></form>`;
   const legacyDeposits = state.orders.filter(item => Number(item.deposit || 0) > 0).map(item => ({ id: `legacy_${item.id}`, orderId: item.id, date: item.createdAt?.slice(0, 10) || "—", amount: Number(item.deposit), kind: "payment", method: "Seña anterior", note: "Registrada antes del historial de pagos" }));
@@ -72,8 +73,27 @@ function customers() {
 }
 
 function sales() {
-  const summary = monthlySummary(state, date().slice(0, 7));
-  return `<div class="stats"><article><span>Facturación del mes</span><strong>${money(summary.revenue)}</strong></article><article><span>Costo de mercadería</span><strong>${money(summary.cost)}</strong></article><article><span>Ganancia bruta</span><strong>${money(summary.revenue - summary.cost)}</strong></article></div>${section("Ventas realizadas", state.sales.length ? rows(["Fecha", "Cliente", "Canal", "Productos", "Total", "Saldo", "Ganancia bruta"], [...state.sales].reverse().map(item => `<tr><td>${esc(item.date)}</td><td>${esc(item.customerName)}</td><td>${esc(item.channel)}</td><td>${item.lines.map(line => `${esc(line.productName)} × ${line.quantity}`).join("<br>")}</td><td>${money(item.total)}</td><td>${money(item.total - paidAmount(state, item.orderId))}</td><td>${money(item.total - item.lines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0))}</td></tr>`).join("")) : empty("Al entregar un pedido, la venta se registra automáticamente."))}`;
+  const filtered = state.sales.filter(item => (!salesFilters.from || item.date >= salesFilters.from) && (!salesFilters.to || item.date <= salesFilters.to) && (!salesFilters.channel || item.channel === salesFilters.channel));
+  const totals = filtered.reduce((result, sale) => {
+    result.revenue += Number(sale.total); result.shipping += Number(sale.shippingAmount || 0); result.discount += Number(sale.discount || 0);
+    result.cost += sale.lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitCost), 0);
+    result.outstanding += Number(sale.total) - paidAmount(state, sale.orderId);
+    return result;
+  }, { revenue: 0, shipping: 0, discount: 0, cost: 0, outstanding: 0 });
+  const products = new Map();
+  for (const sale of filtered) {
+    const subtotal = Number(sale.subtotal || sale.lines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0));
+    for (const line of sale.lines) {
+      const key = line.productId || line.productName, current = products.get(key) || { name: line.productName, quantity: 0, revenue: 0, cost: 0 };
+      const gross = Number(line.quantity) * Number(line.unitPrice), share = subtotal ? gross / subtotal : 0;
+      current.quantity += Number(line.quantity); current.revenue += gross - Number(sale.discount || 0) * share; current.cost += Number(line.quantity) * Number(line.unitCost);
+      products.set(key, current);
+    }
+  }
+  const filterForm = `<form id="sales-filter-form" class="form-grid"><label>Desde<input name="from" type="date" value="${esc(salesFilters.from)}"></label><label>Hasta<input name="to" type="date" value="${esc(salesFilters.to)}"></label><label>Canal<select name="channel">${option("", "Todos los canales", !salesFilters.channel)}${[...new Set(state.sales.map(item => item.channel))].map(item => option(item, item, item === salesFilters.channel)).join("")}</select></label><div class="form-actions"><button class="primary">Aplicar filtros</button><button id="clear-sales-filters" type="button" class="secondary">Limpiar</button></div></form>`;
+  const table = filtered.length ? rows(["Fecha", "Venta", "Cliente", "Canal", "Productos", "Descuento", "Envío", "Total", "Saldo", ""], [...filtered].reverse().map(item => `<tr><td>${esc(item.date)}</td><td>${esc(item.receiptNumber || `A${String(state.sales.indexOf(item) + 1).padStart(3, "0")}`)}</td><td>${esc(item.customerName)}</td><td>${esc(item.channel)}</td><td>${item.lines.map(line => `${esc(line.productName)} × ${line.quantity}`).join("<br>")}</td><td>${money(item.discount || 0)}</td><td>${money(item.shippingAmount || 0)}</td><td>${money(item.total)}</td><td>${money(item.total - paidAmount(state, item.orderId))}</td><td><button class="text-button" data-receipt="${esc(item.id)}">Comprobante</button></td></tr>`).join("")) : empty("No hay ventas para los filtros elegidos.");
+  const productTable = products.size ? rows(["Producto", "Unidades", "Venta neta", "Costo", "Margen"], [...products.values()].sort((a, b) => b.revenue - a.revenue).map(item => `<tr><td>${esc(item.name)}</td><td>${item.quantity}</td><td>${money(item.revenue)}</td><td>${money(item.cost)}</td><td>${money(item.revenue - item.cost)}</td></tr>`).join("")) : empty("Sin productos vendidos en este período.");
+  return `${section("Filtrar ventas", filterForm)}<div class="stats"><article><span>Ventas</span><strong>${filtered.length}</strong><small>Total ${money(totals.revenue)}</small></article><article><span>Margen de productos</span><strong>${money(totals.revenue - totals.shipping - totals.cost)}</strong><small>Sin cargo de envío ni costo de mercadería</small></article><article><span>Descuentos</span><strong>${money(totals.discount)}</strong><small>Aplicados manualmente</small></article><article><span>Por cobrar</span><strong>${money(totals.outstanding)}</strong><small>De las ventas filtradas</small></article></div>${section("Ventas realizadas", table)}${section("Productos vendidos", productTable)}`;
 }
 
 function dataView() {
@@ -103,6 +123,16 @@ function render() {
   document.querySelector("#today").textContent = new Intl.DateTimeFormat("es-UY", { day: "numeric", month: "long", year: "numeric" }).format(new Date());
   document.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("active", button.dataset.view === view));
   app.innerHTML = ({ dashboard, products, purchases, orders, customers, sales, data: dataView })[view]();
+  if (view === "orders") syncOrderControls(document.querySelector("#order-form"));
+}
+
+function syncOrderControls(form, clearInactive = false) {
+  if (!form) return;
+  const discount = form.elements.discountType.value === "none", shipping = form.elements.shippingPayer.value !== "included_in_sale";
+  if (clearInactive && discount) form.elements.discountValue.value = "0";
+  if (clearInactive && shipping) form.elements.shippingAmount.value = "0";
+  form.elements.discountValue.disabled = discount;
+  form.elements.shippingAmount.disabled = shipping;
 }
 
 document.addEventListener("click", event => {
@@ -117,14 +147,18 @@ document.addEventListener("click", event => {
   if (target.dataset.editOrder) {
     const item = state.orders.find(p => p.id === target.dataset.editOrder), form = document.querySelector("#order-form");
     for (const key of ["id", "customerName", "contact", "channel", "status", "deliveryMethod", "deliveryDate", "trackingCode", "notes"]) form.elements[key].value = item[key] ?? "";
+    for (const [key, fallback] of [["discountType", "none"], ["discountValue", 0], ["shippingPayer", "recipient_on_delivery"], ["shippingAmount", 0], ["warrantyDays", 30]]) form.elements[key].value = item[key] ?? fallback;
+    syncOrderControls(form);
     form.querySelector("#order-lines").innerHTML = item.lines.map(line => orderLine(line)).join("");
     form.scrollIntoView({ behavior: "smooth" });
   }
   if (target.id === "add-line") document.querySelector("#order-lines").insertAdjacentHTML("beforeend", orderLine());
   if (target.classList.contains("remove-line")) { const container = target.closest("#order-lines"); if (container.children.length > 1) target.closest(".order-line").remove(); else toast("El pedido necesita al menos un producto."); }
-  if (target.id === "clear-order") { const form = document.querySelector("#order-form"); form.reset(); form.elements.id.value = ""; form.querySelector("#order-lines").innerHTML = state.products.length ? orderLine() : ""; }
+  if (target.id === "clear-order") { const form = document.querySelector("#order-form"); form.reset(); form.elements.id.value = ""; form.querySelector("#order-lines").innerHTML = state.products.length ? orderLine() : ""; syncOrderControls(form, true); }
+  if (target.id === "clear-sales-filters") { salesFilters = { from: "", to: "", channel: "" }; render(); }
+  if (target.dataset.receipt) window.open(`receipt.html?sale=${encodeURIComponent(target.dataset.receipt)}`, "_blank", "noopener");
   if (target.dataset.deliver) {
-    try { persist(deliverOrder(state, target.dataset.deliver, date())); toast("Pedido entregado y venta registrada."); } catch (error) { toast(error.message); }
+    try { const next = deliverOrder(state, target.dataset.deliver, date()); persist(next); window.open(`receipt.html?sale=${encodeURIComponent(next.sales.at(-1).id)}`, "_blank", "noopener"); toast("Venta registrada. El comprobante está disponible en Ventas."); } catch (error) { toast(error.message); }
   }
   if (target.id === "export") {
     const blob = new Blob([JSON.stringify({ application: "Cualitec Gestión", version: 1, exportedAt: new Date().toISOString(), data: state }, null, 2)], { type: "application/json" });
@@ -149,6 +183,11 @@ document.addEventListener("click", event => {
 });
 
 document.addEventListener("submit", async event => {
+  if (event.target.getAttribute("id") === "sales-filter-form") {
+    event.preventDefault(); const data = Object.fromEntries(new FormData(event.target));
+    if (data.from && data.to && data.from > data.to) { toast("La fecha inicial debe ser anterior a la final."); return; }
+    salesFilters = { from: data.from, to: data.to, channel: data.channel }; render(); return;
+  }
   if (event.target.id === "password-form") {
     event.preventDefault();
     const form = event.target, data = Object.fromEntries(new FormData(form));
@@ -182,7 +221,7 @@ document.addEventListener("submit", async event => {
       const previous = state.orders.find(item => item.id === data.id);
       if (previous?.status === "delivered") throw new Error("Una venta entregada no se puede modificar.");
       const lines = [...form.querySelectorAll(".order-line")].map(row => ({ productId: row.querySelector('[name="productId"]').value, quantity: Number(row.querySelector('[name="quantity"]').value), unitPrice: Number(row.querySelector('[name="unitPrice"]').value) }));
-      const order = { id: data.id || id("order"), customerName: data.customerName.trim(), contact: data.contact.trim(), channel: data.channel, status: data.status, deposit: Number(previous?.deposit || 0), deliveryMethod: data.deliveryMethod, shippingPayer: "recipient_on_delivery", trackingCode: data.trackingCode.trim(), deliveryDate: data.deliveryDate, notes: data.notes.trim(), createdAt: previous?.createdAt || new Date().toISOString(), lines };
+      const order = { id: data.id || id("order"), customerName: data.customerName.trim(), contact: data.contact.trim(), channel: data.channel, status: data.status, deposit: Number(previous?.deposit || 0), discountType: data.discountType, discountValue: Number(data.discountValue || 0), deliveryMethod: data.deliveryMethod, shippingPayer: data.shippingPayer, shippingAmount: Number(data.shippingAmount || 0), warrantyDays: Number(data.warrantyDays), trackingCode: data.trackingCode.trim(), deliveryDate: data.deliveryDate, notes: data.notes.trim(), createdAt: previous?.createdAt || new Date().toISOString(), lines };
       persist(saveOrder(state, order));
     }
     toast("Guardado correctamente.");
@@ -190,6 +229,7 @@ document.addEventListener("submit", async event => {
 });
 
 document.addEventListener("change", async event => {
+  if (["discountType", "shippingPayer"].includes(event.target.name) && event.target.closest("#order-form")) syncOrderControls(event.target.form, true);
   if (event.target.id === "import") {
     try {
       const input = JSON.parse(await event.target.files[0].text());
