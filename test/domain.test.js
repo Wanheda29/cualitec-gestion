@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyState, normalizeState, findProductByCode, addPurchase, saveOrder, availableQuantity, deliverOrder, orderTotal, monthlySummary, paidAmount, recordPayment } from "../domain.js";
+import { emptyState, normalizeState, findProductByCode, addPurchase, adjustStock, saveOrder, availableQuantity, deliverOrder, orderTotal, monthlySummary, paidAmount, recordPayment, stockMovements } from "../domain.js";
 import { salesReportCsv } from "../reports.js";
 
 const product = { id: "p1", name: "Auriculares", stock: 0, averageCost: 0, price: 1000 };
@@ -101,5 +101,16 @@ test("encuentra una variante por código de barras o SKU", () => {
   assert.equal(findProductByCode(products, "001234")?.id, "p1");
   assert.equal(findProductByCode(products, " aur-01 ")?.id, "p1");
   assert.equal(findProductByCode(products, "1234"), undefined);
+});
+
+test("el historial de stock reúne entradas, ajustes y salidas por venta", () => {
+  const initial = { ...structuredClone(emptyState), products: [product] };
+  const purchased = addPurchase(initial, { id: "c1", productId: "p1", date: "2026-09-29", quantity: 3, unitCost: 600, supplier: "Proveedor" });
+  const adjusted = adjustStock(purchased, { id: "a1", productId: "p1", date: "2026-09-30T12:00:00.000Z", newStock: 2, reason: "Recuento" });
+  const saved = saveOrder(adjusted, order("o1", "reserved", 1));
+  const delivered = deliverOrder(saved, "o1", "2026-10-01");
+  assert.deepEqual(stockMovements(delivered).map(item => [item.type, item.quantity, item.date]), [["Venta", -1, "2026-10-01"], ["Ajuste", -1, "2026-09-30"], ["Compra", 3, "2026-09-29"]]);
+  assert.equal(delivered.products[0].stock, 1);
+  assert.match(stockMovements(delivered)[1].detail, /Recuento/);
 });
 

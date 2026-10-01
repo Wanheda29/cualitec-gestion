@@ -7,6 +7,7 @@ Panel interno para un emprendimiento que vende tecnología por Instagram, WhatsA
 - Catálogo de variantes (color o capacidad), cada una con código de barras, SKU, precio, costo promedio, stock y mínimo de reposición.
 - Búsqueda por nombre, código de barras o SKU. En un pedido, escribir o escanear el código agrega la variante; repetirlo aumenta la cantidad. Un lector que funciona como teclado sirve sin cámara.
 - Registro de compras y ajustes de stock con motivo.
+- Registro de movimientos de stock con compras, ajustes y salidas por ventas, filtrable por producto y rango de fechas.
 - Pedidos con varios productos como consulta, reserva de stock o encargo sin stock. Una entrega descuenta unidades y crea una venta una sola vez.
 - Descuentos manuales por importe fijo o porcentaje. Se pueden agregar al pedido antes de entregarlo; no se aplican automáticamente.
 - Cobros parciales y devoluciones con fecha, medio de pago e historial. El saldo se calcula por pedido; las señas registradas antes de esta actualización se conservan.

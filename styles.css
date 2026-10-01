@@ -2,3 +2,4 @@
 
 .order-line{grid-template-columns:repeat(2,minmax(0,1fr))}.order-line label:first-child,.order-line .remove-line{grid-column:1/-1}.order-line .remove-line{text-align:left}
 .catalog-search{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;color:#56667c;font-size:11px;font-weight:700}.catalog-search input{width:100%;padding:10px 11px;border:1px solid #dce4ed;border-radius:8px;outline:0;color:#1d2b42;background:white;font-size:13px}.catalog-search input:focus{border-color:#14ae96;box-shadow:0 0 0 3px #14ae9622}[hidden]{display:none!important}
+.stock-in{color:#0b8c73;font-weight:700}.stock-out{color:#b14a45;font-weight:700}

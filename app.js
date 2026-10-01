@@ -1,4 +1,4 @@
-import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, findProductByCode, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary } from "./domain.js";
+import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, findProductByCode, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary, stockMovements } from "./domain.js";
 import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readCloud, writeCloud, listCloudHistory, readCloudRevision } from "./cloud.js";
 import { salesReportCsv } from "./reports.js";
 
@@ -10,6 +10,7 @@ let view = "dashboard";
 let session = null, cloudRevision = 0, cloudEnabled = false, cloudPending = null;
 let cloudCheck = "";
 let salesFilters = { from: "", to: "", channel: "" };
+let stockFilters = { from: "", to: "", productId: "" };
 let historySnapshots = [], historyStatus = "", historyAvailable = false;
 let saveQueue = Promise.resolve();
 const app = document.querySelector("#app");
@@ -56,7 +57,10 @@ function purchases() {
   const form = `<form id="purchase-form" class="form-grid"><label>Producto<select name="productId" required>${productOptions()}</select></label><label>Cantidad recibida<input name="quantity" type="number" min="1" step="1" required></label><label>Costo unitario<input name="unitCost" type="number" min="0" step="0.01" required></label><label>Fecha<input name="date" type="date" value="${date()}" required></label><label>Proveedor<input name="supplier" placeholder="Opcional"></label><div class="form-actions"><button class="primary" ${state.products.length ? "" : "disabled"}>Registrar compra</button></div></form>`;
   const adjustments = `<form id="adjust-form" class="form-grid"><label>Producto<select name="productId" required>${productOptions()}</select></label><label>Nuevo stock<input name="newStock" type="number" min="0" step="1" required></label><label class="wide">Motivo<input name="reason" required placeholder="Ej. Recuento, devolución o pérdida"></label><div class="form-actions"><button class="secondary" ${state.products.length ? "" : "disabled"}>Ajustar stock</button></div></form>`;
   const history = state.purchases.length ? rows(["Fecha", "Producto", "Proveedor", "Cantidad", "Costo total"], [...state.purchases].reverse().map(item => `<tr><td>${esc(item.date)}</td><td>${esc(productName(item.productId))}</td><td>${esc(item.supplier || "—")}</td><td>${item.quantity}</td><td>${money(item.quantity * item.unitCost)}</td></tr>`).join("")) : empty("Las compras registradas aparecerán aquí.");
-  return `<div class="grid two">${section("Entrada de mercadería", form)}${section("Ajuste de inventario", adjustments)}</div>${section("Historial de compras", history)}`;
+  const movements = stockMovements(state).filter(item => (!stockFilters.from || item.date >= stockFilters.from) && (!stockFilters.to || item.date <= stockFilters.to) && (!stockFilters.productId || item.productId === stockFilters.productId));
+  const filterForm = `<form id="stock-filter-form" class="form-grid"><label>Desde<input name="from" type="date" value="${esc(stockFilters.from)}"></label><label>Hasta<input name="to" type="date" value="${esc(stockFilters.to)}"></label><label>Producto<select name="productId">${option("", "Todos los productos", !stockFilters.productId)}${state.products.map(item => option(item.id, productName(item.id), item.id === stockFilters.productId)).join("")}</select></label><div class="form-actions"><button class="primary">Aplicar filtros</button><button id="clear-stock-filters" type="button" class="secondary">Limpiar</button></div></form>`;
+  const movementTable = movements.length ? rows(["Fecha", "Producto", "Movimiento", "Detalle", "Unidades"], movements.map(item => `<tr><td>${esc(item.date || "—")}</td><td>${esc(item.productName)}</td><td>${esc(item.type)}</td><td>${esc(item.detail)}</td><td class="${item.quantity < 0 ? "stock-out" : "stock-in"}">${item.quantity > 0 ? "+" : ""}${item.quantity}</td></tr>`).join("")) : empty("No hay movimientos de stock para los filtros elegidos.");
+  return `<div class="grid two">${section("Entrada de mercadería", form)}${section("Ajuste de inventario", adjustments)}</div>${section("Movimientos de stock", `${filterForm}<p class="form-hint">Incluye entradas por compras, ajustes y salidas al entregar ventas. Las reservas reducen lo disponible, pero no el stock físico.</p>${movementTable}`)}${section("Historial de compras", history)}`;
 }
 
 function orders() {
@@ -184,6 +188,7 @@ document.addEventListener("click", event => {
   if (target.classList.contains("remove-line")) { const container = target.closest("#order-lines"); if (container.children.length > 1) target.closest(".order-line").remove(); else toast("El pedido necesita al menos un producto."); }
   if (target.id === "clear-order") { const form = document.querySelector("#order-form"); form.reset(); form.elements.id.value = ""; form.querySelector("#order-lines").innerHTML = state.products.length ? orderLine() : ""; syncOrderControls(form, true); }
   if (target.id === "clear-sales-filters") { salesFilters = { from: "", to: "", channel: "" }; render(); }
+  if (target.id === "clear-stock-filters") { stockFilters = { from: "", to: "", productId: "" }; render(); }
   if (target.id === "export-sales") {
     const report = salesReportCsv(state, filteredSales());
     const blob = new Blob(["\ufeff", report], { type: "text/csv;charset=utf-8" });
@@ -232,6 +237,11 @@ document.addEventListener("click", event => {
 });
 
 document.addEventListener("submit", async event => {
+  if (event.target.getAttribute("id") === "stock-filter-form") {
+    event.preventDefault(); const data = Object.fromEntries(new FormData(event.target));
+    if (data.from && data.to && data.from > data.to) { toast("La fecha inicial debe ser anterior a la final."); return; }
+    stockFilters = { from: data.from, to: data.to, productId: data.productId }; render(); return;
+  }
   if (event.target.getAttribute("id") === "sales-filter-form") {
     event.preventDefault(); const data = Object.fromEntries(new FormData(event.target));
     if (data.from && data.to && data.from > data.to) { toast("La fecha inicial debe ser anterior a la final."); return; }

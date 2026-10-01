@@ -119,3 +119,12 @@ export function monthlySummary(state, month) {
   }, { sales: 0, revenue: 0, shipping: 0, discount: 0, cost: 0 });
 }
 
+export function stockMovements(state) {
+  const names = new Map(state.products.map(item => [item.id, `${item.name}${item.variant ? ` · ${item.variant}` : ""}`]));
+  const movements = [];
+  for (const purchase of state.purchases) movements.push({ id: purchase.id, date: purchase.date?.slice(0, 10) || "", productId: purchase.productId, productName: names.get(purchase.productId) || "Producto eliminado", type: "Compra", detail: purchase.supplier ? `Proveedor: ${purchase.supplier}` : "Entrada de mercadería", quantity: Number(purchase.quantity) });
+  for (const adjustment of state.stockAdjustments) movements.push({ id: adjustment.id, date: adjustment.date?.slice(0, 10) || "", productId: adjustment.productId, productName: names.get(adjustment.productId) || "Producto eliminado", type: "Ajuste", detail: adjustment.reason || "Recuento de inventario", quantity: Number(adjustment.newStock) - Number(adjustment.previousStock) });
+  for (const sale of state.sales) for (const [index, line] of sale.lines.entries()) movements.push({ id: `${sale.id}_${index}`, date: sale.date?.slice(0, 10) || "", productId: line.productId, productName: line.productName || names.get(line.productId) || "Producto eliminado", type: "Venta", detail: `${sale.receiptNumber || "Venta"} · ${sale.customerName || "Cliente"}`, quantity: -Number(line.quantity) });
+  return movements.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+}
+
