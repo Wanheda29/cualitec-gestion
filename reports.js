@@ -1,4 +1,4 @@
-import { paidAmount, paymentMethods } from "./domain.js?v=payments-20261001";
+import { paidAmount, paymentMethods } from "./domain.js?v=messages-20261001";
 
 const number = value => Number(value || 0).toFixed(2).replace(".", ",");
 const cell = value => {

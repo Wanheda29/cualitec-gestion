@@ -1,12 +1,14 @@
-import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, findProductByCode, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary, stockMovements, paymentMovements } from "./domain.js?v=payments-20261001";
-import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readCloud, writeCloud, listCloudHistory, readCloudRevision } from "./cloud.js";
-import { salesReportCsv, paymentReportCsv } from "./reports.js?v=payments-20261001";
+import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, findProductByCode, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary, stockMovements, paymentMovements, dailyPending } from "./domain.js?v=messages-20261001";
+import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readCloud, writeCloud, listCloudHistory, readCloudRevision } from "./cloud.js?v=messages-20261001";
+import { salesReportCsv, paymentReportCsv } from "./reports.js?v=messages-20261001";
+import { messageTypes, orderMessage, whatsappPhone, whatsappUrl } from "./messages.js?v=messages-20261001";
 
 const KEY = "cualitec-gestion-v1";
 let state;
 try { state = normalizeState(JSON.parse(localStorage.getItem(KEY)) || emptyState); }
 catch { state = structuredClone(emptyState); }
 let view = "dashboard";
+let selectedOrderId = null;
 let session = null, cloudRevision = 0, cloudEnabled = false, cloudPending = null;
 let cloudCheck = "";
 let salesFilters = { from: "", to: "", channel: "" };
@@ -42,8 +44,17 @@ function dashboard() {
   const month = date().slice(0, 7), summary = monthlySummary(state, month);
   const pending = state.orders.filter(item => !["delivered", "cancelled"].includes(item.status));
   const low = state.products.filter(item => Number(item.stock) <= Number(item.minStock || 0));
+  const attention = dailyPending(state, date());
+  const groups = [
+    ["Entregas de hoy", attention.today, "No hay entregas previstas para hoy."],
+    ["Entregas atrasadas", attention.overdue, "No hay entregas atrasadas."],
+    ["Saldos por cobrar", attention.unpaid, "No hay ventas entregadas con saldo pendiente."],
+    ["Encargos con stock disponible", attention.stocked, "No hay encargos con stock suficiente."]
+  ];
+  const pendingPanels = groups.map(([title, orders, message]) => `<article class="pending-group"><h3>${title} <span class="badge">${orders.length}</span></h3>${orders.length ? rows(["Cliente / productos", "Entrega", "Saldo", ""], orders.map(item => `<tr><td><strong>${esc(item.customerName)}</strong><small>${item.lines.map(line => `${esc(productName(line.productId))} × ${esc(line.quantity)}`).join("<br>")}</small></td><td>${esc(item.deliveryDate || "Sin fecha")}<small>${item.deliveryMethod === "dac" ? "DAC" : "Montevideo"}</small></td><td>${money(orderTotal(item) - paidAmount(state, item.id))}</td><td><button class="text-button" data-open-order="${esc(item.id)}" aria-label="Ver pedido de ${esc(item.customerName)}">Ver pedido</button></td></tr>`).join("")) : empty(message)}</article>`).join("");
   return `<div class="hero"><div><span class="eyebrow">TU NEGOCIO EN UN VISTAZO</span><h2>Vendé con claridad.<br><em>Gestioná con control.</em></h2><p>Stock, pedidos de redes sociales y resultados, en un mismo lugar.</p></div><button class="primary" data-view="orders">Nuevo pedido →</button></div>
     <div class="stats"><article><span>Ventas del mes</span><strong>${money(summary.revenue)}</strong><small>${summary.sales} operaciones</small></article><article><span>Margen de productos</span><strong>${money(summary.revenue - summary.shipping - summary.cost)}</strong><small>Ventas sin envíos menos costo de mercadería</small></article><article><span>Pedidos activos</span><strong>${pending.length}</strong><small>Por atender o entregar</small></article><article><span>Productos con stock bajo</span><strong>${low.length}</strong><small>Según mínimo configurado</small></article></div>
+    ${section("Pendientes de hoy", `<p class="form-hint">Entregas, cobros y encargos que necesitan atención. Un pedido puede aparecer en más de un grupo. El stock de cada encargo se comprueba por separado y todavía no queda reservado.</p><div class="grid two">${pendingPanels}</div>`)}
     <div class="grid two">${section("Pedidos en curso", pending.length ? rows(["Cliente", "Productos", "Estado", "Entrega"], pending.slice(-5).reverse().map(item => `<tr><td>${esc(item.customerName)}</td><td>${item.lines.map(line => `${esc(productName(line.productId))} × ${line.quantity}`).join("<br>")}</td><td>${badge(orderStatuses[item.status])}</td><td>${esc(item.deliveryDate || "Sin fecha")}</td></tr>`).join("")) : empty("Todavía no hay pedidos activos."))}
     ${section("Reponer pronto", low.length ? rows(["Producto", "En stock", "Disponible"], low.map(item => `<tr><td>${esc(item.name)}</td><td>${item.stock}</td><td>${availableQuantity(state, item.id)}</td></tr>`).join("")) : empty("El inventario está por encima de los mínimos."))}</div>`;
 }
@@ -64,9 +75,31 @@ function purchases() {
   return `<div class="grid two">${section("Entrada de mercadería", form)}${section("Ajuste de inventario", adjustments)}</div>${section("Movimientos de stock", `${filterForm}<p class="form-hint">Incluye entradas por compras, ajustes y salidas al entregar ventas. Las reservas reducen lo disponible, pero no el stock físico.</p>${movementTable}`)}${section("Historial de compras", history)}`;
 }
 
+function selectedOrderDetails() {
+  const order = state.orders.find(item => item.id === selectedOrderId);
+  if (!order) return "";
+  return section("Pedido seleccionado", `<div id="selected-order" tabindex="-1"><h3>${esc(order.customerName)}</h3><p>${esc(order.contact)} · ${esc(order.channel)} · ${badge(orderStatuses[order.status])}</p>${rows(["Producto", "Cantidad", "Precio unitario"], order.lines.map(line => `<tr><td>${esc(productName(line.productId))}</td><td>${esc(line.quantity)}</td><td>${money(line.unitPrice)}</td></tr>`).join(""))}<p>Total: <strong>${money(orderTotal(order))}</strong> · Cobrado: ${money(paidAmount(state, order.id))} · Saldo: <strong>${money(orderTotal(order) - paidAmount(state, order.id))}</strong></p><p>Entrega: ${esc(order.deliveryDate || "Sin fecha")} · ${order.deliveryMethod === "dac" ? "DAC" : "Montevideo"}${order.trackingCode ? ` · Guía: ${esc(order.trackingCode)}` : ""}</p>${order.notes ? `<p>Notas: ${esc(order.notes)}</p>` : ""}<div class="form-actions">${!["delivered", "cancelled"].includes(order.status) ? `<button class="secondary" data-edit-order="${esc(order.id)}">Editar pedido</button>` : ""}<button class="primary" data-order-payment="${esc(order.id)}">Registrar cobro o devolución</button></div></div>`);
+}
+
+function messageComposer() {
+  const order = state.orders.find(item => item.id === selectedOrderId);
+  if (!order) return "";
+  const phone = whatsappPhone(order.contact);
+  const types = Object.entries(messageTypes).filter(([type]) => type === "detail" || (order.status !== "cancelled" && (type !== "balance" || Math.round((orderTotal(order) - paidAmount(state, order.id)) * 100) > 0)));
+  return section("Mensaje para el cliente", `<div class="form-grid"><label>Tipo de mensaje<select id="message-kind">${types.map(([value, label]) => option(value, label)).join("")}</select></label><label>Teléfono para WhatsApp<input id="message-phone" type="tel" value="${esc(phone ? `+${phone}` : "")}" placeholder="Ej. 099 123 456 o +598 99 123 456"></label><p class="form-hint wide" id="message-destination">${phone ? `Se abrirá WhatsApp para +${phone}.` : "Para WhatsApp, ingresá un celular uruguayo o un teléfono con código de país. Si el contacto es un usuario de Instagram, podés copiar el mensaje."}</p><label class="wide">Texto para revisar y editar<textarea id="order-message" rows="12">${esc(orderMessage(state, order.id))}</textarea></label><p class="form-hint wide">Revisá el destinatario y el texto. Abrir WhatsApp prepara el mensaje; vos decidís cuándo enviarlo. Las ediciones de este texto son temporales.</p><div class="form-actions"><button class="secondary" id="copy-order-message">Copiar mensaje</button><button class="primary" id="open-order-whatsapp" ${phone ? "" : "disabled"}>Abrir WhatsApp</button></div></div>`);
+}
+
+function updateMessageDestination() {
+  const text = document.querySelector("#order-message"), phone = document.querySelector("#message-phone");
+  if (!text || !phone) return;
+  const number = whatsappPhone(phone.value);
+  document.querySelector("#open-order-whatsapp").disabled = !whatsappUrl(phone.value, text.value);
+  document.querySelector("#message-destination").textContent = number ? `Se abrirá WhatsApp para +${number}.` : "Ingresá un celular uruguayo o un teléfono con código de país. También podés copiar el mensaje.";
+}
+
 function orders() {
   const form = `<form id="order-form" class="form-grid"><input name="id" type="hidden"><label>Cliente<input name="customerName" required></label><label>Contacto / usuario de red<input name="contact" required placeholder="Teléfono o @usuario"></label><label>Canal<select name="channel">${["Instagram", "WhatsApp", "Facebook", "Otro"].map(x => option(x, x)).join("")}</select></label><label>Estado<select name="status">${Object.entries(orderStatuses).filter(([key]) => key !== "delivered").map(([key, value]) => option(key, value)).join("")}</select></label><div class="wide"><label>Código de barras o SKU<input id="order-code" autocomplete="off" placeholder="Escribí o escaneá el código"></label><div class="form-actions"><button id="add-by-code" class="secondary" type="button">Agregar por código</button></div><p class="form-hint">El lector escribe el código aquí como si fuera un teclado. También podés ingresarlo a mano y pulsar Enter.</p></div><div class="wide"><div id="order-lines" class="order-lines">${state.products.length ? orderLine() : ""}</div><button id="add-line" class="secondary" type="button" ${state.products.length ? "" : "disabled"}>Agregar producto</button></div><label>Descuento manual<select name="discountType">${Object.entries(discountTypes).map(([key, value]) => option(key, value)).join("")}</select></label><label>Valor del descuento<input name="discountValue" type="number" min="0" step="0.01" value="0" required></label><label>Entrega<select name="deliveryMethod"><option value="montevideo">Montevideo · en el día</option><option value="dac">Interior · DAC</option></select></label><label>Fecha prevista de entrega<input name="deliveryDate" type="date"></label><label>Envío<select name="shippingPayer"><option value="recipient_on_delivery">Destinatario paga al recibir</option><option value="included_in_sale">Cualitec cobra el envío</option></select></label><label>Cargo de envío<input name="shippingAmount" type="number" min="0" step="0.01" value="0" required></label><label>Garantía (días)<input name="warrantyDays" type="number" min="0" step="1" value="30" required></label><label>Guía DAC<input name="trackingCode" placeholder="Opcional"></label><label class="wide">Notas<textarea name="notes" rows="2" placeholder="Dirección, acuerdos, preferencias..."></textarea></label><p class="form-hint wide">Descuento y cargo de envío se ingresan manualmente. Por defecto, el destinatario paga el envío al recibir y no se suma a la venta.</p><div class="form-actions"><button class="primary" ${state.products.length ? "" : "disabled"}>Guardar pedido</button><button id="clear-order" class="secondary" type="button">Limpiar</button></div></form>`;
-  const table = state.orders.length ? rows(["Cliente", "Productos", "Canal", "Estado", "Total / saldo", "Entrega", "Acciones"], [...state.orders].reverse().map(item => `<tr><td><strong>${esc(item.customerName)}</strong><small>${esc(item.contact)}</small></td><td>${item.lines.map(line => `${esc(productName(line.productId))} × ${line.quantity}`).join("<br>")}</td><td>${esc(item.channel)}</td><td>${badge(orderStatuses[item.status])}</td><td>${money(orderTotal(item))}<small>${item.status === "cancelled" ? `A devolver ${money(paidAmount(state, item.id))}` : `Cobrado ${money(paidAmount(state, item.id))} · Saldo ${money(orderTotal(item) - paidAmount(state, item.id))}`}</small></td><td>${item.deliveryMethod === "dac" ? "DAC" : "Montevideo"}<small>${esc(item.deliveryDate || "Sin fecha")}${item.trackingCode ? ` · ${esc(item.trackingCode)}` : ""}</small></td><td><div class="row-actions">${item.status !== "delivered" ? `<button class="text-button" data-edit-order="${esc(item.id)}">Editar</button>` : ""}${!["delivered", "cancelled"].includes(item.status) ? `<button class="text-button" data-deliver="${esc(item.id)}">Entregar</button>` : ""}</div></td></tr>`).join("")) : empty("Registrá consultas o pedidos que llegan por redes.");
+  const table = state.orders.length ? rows(["Cliente", "Productos", "Canal", "Estado", "Total / saldo", "Entrega", "Acciones"], [...state.orders].reverse().map(item => `<tr><td><strong>${esc(item.customerName)}</strong><small>${esc(item.contact)}</small></td><td>${item.lines.map(line => `${esc(productName(line.productId))} × ${line.quantity}`).join("<br>")}</td><td>${esc(item.channel)}</td><td>${badge(orderStatuses[item.status])}</td><td>${money(orderTotal(item))}<small>${item.status === "cancelled" ? `A devolver ${money(paidAmount(state, item.id))}` : `Cobrado ${money(paidAmount(state, item.id))} · Saldo ${money(orderTotal(item) - paidAmount(state, item.id))}`}</small></td><td>${item.deliveryMethod === "dac" ? "DAC" : "Montevideo"}<small>${esc(item.deliveryDate || "Sin fecha")}${item.trackingCode ? ` · ${esc(item.trackingCode)}` : ""}</small></td><td><div class="row-actions"><button class="text-button" data-open-order="${esc(item.id)}">Ver pedido</button>${item.status !== "delivered" ? `<button class="text-button" data-edit-order="${esc(item.id)}">Editar</button>` : ""}${!["delivered", "cancelled"].includes(item.status) ? `<button class="text-button" data-deliver="${esc(item.id)}">Entregar</button>` : ""}</div></td></tr>`).join("")) : empty("Registrá consultas o pedidos que llegan por redes.");
   const paymentForm = `<form id="payment-form" class="form-grid"><label>Pedido<select name="orderId" required>${state.orders.map(item => option(item.id, `${item.customerName} · ${money(orderTotal(item))}`)).join("")}</select></label><label>Movimiento<select name="kind"><option value="payment">Cobro</option><option value="refund">Devolución de dinero</option></select></label><label>Importe<input name="amount" type="number" min="0.01" step="0.01" required></label><label>Medio de pago<select name="method">${Object.entries(paymentMethods).map(([key, value]) => option(key, value)).join("")}</select></label><label>Fecha<input name="date" type="date" value="${date()}" required></label><label>Referencia / nota<input name="note" placeholder="Opcional"></label><div class="form-actions"><button class="primary" ${state.orders.length ? "" : "disabled"}>Registrar movimiento</button></div></form>`;
   const legacyDeposits = state.orders.filter(item => Number(item.deposit || 0) > 0).map(item => ({ id: `legacy_${item.id}`, orderId: item.id, date: item.createdAt?.slice(0, 10) || "—", amount: Number(item.deposit), kind: "payment", method: "Seña anterior", note: "Registrada antes del historial de pagos" }));
   const movements = [...legacyDeposits, ...(state.payments || [])];
@@ -148,6 +181,10 @@ function render() {
   document.querySelector("#today").textContent = new Intl.DateTimeFormat("es-UY", { day: "numeric", month: "long", year: "numeric" }).format(new Date());
   document.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("active", button.dataset.view === view));
   app.innerHTML = ({ dashboard, products, purchases, orders, customers, sales, data: dataView })[view]();
+  if (view === "orders" && selectedOrderId) {
+    app.insertAdjacentHTML("afterbegin", selectedOrderDetails() + messageComposer());
+    document.querySelector("#payment-form").elements.orderId.value = selectedOrderId;
+  }
   if (view === "orders") syncOrderControls(document.querySelector("#order-form"));
 }
 
@@ -178,6 +215,29 @@ document.addEventListener("click", event => {
   const target = event.target.closest("button"); if (!target) return;
   if (target.dataset.view) { view = target.dataset.view; render(); document.querySelector(".sidebar").classList.remove("open"); }
   if (target.id === "menu") document.querySelector(".sidebar").classList.toggle("open");
+  if (target.id === "copy-order-message") {
+    const text = document.querySelector("#order-message");
+    if (!text.value.trim()) { toast("Escribí un mensaje antes de copiarlo."); return; }
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text.value).then(() => toast("Mensaje copiado.")).catch(() => { text.focus(); text.select(); toast("No se pudo copiar automáticamente. El texto quedó seleccionado para copiarlo."); });
+    else { text.focus(); text.select(); toast("El texto quedó seleccionado para copiarlo."); }
+  }
+  if (target.id === "open-order-whatsapp") {
+    const url = whatsappUrl(document.querySelector("#message-phone").value, document.querySelector("#order-message").value);
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+    else { updateMessageDestination(); toast("Revisá el teléfono y el mensaje."); }
+  }
+  if (target.dataset.openOrder) {
+    selectedOrderId = target.dataset.openOrder; view = "orders"; render();
+    const paymentForm = document.querySelector("#payment-form");
+    paymentForm.elements.orderId.value = selectedOrderId;
+    const details = document.querySelector("#selected-order");
+    details?.focus({ preventScroll: true }); details?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  if (target.dataset.orderPayment) {
+    const form = document.querySelector("#payment-form");
+    form.elements.orderId.value = target.dataset.orderPayment;
+    form.scrollIntoView({ behavior: "smooth", block: "center" }); form.elements.amount.focus({ preventScroll: true });
+  }
   if (target.dataset.editProduct) {
     const item = state.products.find(p => p.id === target.dataset.editProduct), form = document.querySelector("#product-form");
     for (const key of ["id", "name", "category", "variant", "barcode", "sku", "price", "minStock"]) form.elements[key].value = item[key] ?? "";
@@ -309,6 +369,10 @@ document.addEventListener("submit", async event => {
 });
 
 document.addEventListener("change", async event => {
+  if (event.target.id === "message-kind") {
+    try { document.querySelector("#order-message").value = orderMessage(state, selectedOrderId, event.target.value); updateMessageDestination(); }
+    catch (error) { toast(error.message); }
+  }
   if (event.target.closest(".order-line")) event.target.closest(".order-line").removeAttribute("data-pristine");
   if (["discountType", "shippingPayer"].includes(event.target.name) && event.target.closest("#order-form")) syncOrderControls(event.target.form, true);
   if (event.target.id === "import") {
@@ -325,6 +389,7 @@ document.addEventListener("change", async event => {
   }
 });
 document.addEventListener("input", event => {
+  if (["message-phone", "order-message"].includes(event.target.id)) updateMessageDestination();
   if (event.target.closest(".order-line")) event.target.closest(".order-line").removeAttribute("data-pristine");
   if (event.target.id === "product-search") {
     const query = event.target.value.trim().toLowerCase();

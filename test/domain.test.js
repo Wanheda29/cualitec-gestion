@@ -2,9 +2,42 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyState, normalizeState, findProductByCode, addPurchase, adjustStock, saveOrder, availableQuantity, deliverOrder, orderTotal, monthlySummary, paidAmount, recordPayment, stockMovements, paymentMovements } from "../domain.js";
 import { salesReportCsv, paymentReportCsv } from "../reports.js";
+import { dailyPending } from "../domain.js";
 
 const product = { id: "p1", name: "Auriculares", stock: 0, averageCost: 0, price: 1000 };
 const order = (id, status, quantity) => ({ id, customerName: "Ana", contact: "@ana", channel: "Instagram", status, deposit: 0, lines: [{ productId: "p1", quantity, unitPrice: 1000 }] });
+
+test("los pendientes separan entregas y saldos sin incluir cancelados ni ventas pagadas", () => {
+  const state = { ...structuredClone(emptyState), products: [product], orders: [
+    { ...order("today", "reserved", 1), deliveryDate: "2026-10-01" },
+    { ...order("late", "ready", 1), deliveryDate: "2026-09-30" },
+    { ...order("future", "inquiry", 1), deliveryDate: "2026-10-02" },
+    order("no-date", "inquiry", 1),
+    { ...order("cancelled", "cancelled", 1), deliveryDate: "2026-09-29" },
+    { ...order("debt", "delivered", 1), deliveryDate: "2026-09-28", deposit: 200 },
+    { ...order("paid", "delivered", 1), deposit: 200 }
+  ], payments: [{ id: "payment", orderId: "paid", kind: "payment", amount: 800 }] };
+  const pending = dailyPending(state, "2026-10-01");
+  assert.deepEqual(pending.today.map(item => item.id), ["today"]);
+  assert.deepEqual(pending.overdue.map(item => item.id), ["late"]);
+  assert.deepEqual(pending.unpaid.map(item => item.id), ["debt"]);
+  assert.deepEqual(dailyPending(state, "2026-10-02").overdue.map(item => item.id), ["late", "today"]);
+});
+
+test("los encargos necesitan stock disponible para todas las variantes y respetan reservas", () => {
+  const state = { ...structuredClone(emptyState), products: [{ ...product, stock: 3 }, { ...product, id: "p2", stock: 0 }], orders: [
+    order("reservation", "reserved", 2),
+    order("enough", "requested", 1),
+    order("too-many", "requested", 2),
+    { ...order("multiple", "requested", 1), lines: [{ productId: "p1", quantity: 1, unitPrice: 1000 }, { productId: "p2", quantity: 1, unitPrice: 500 }] },
+    { ...order("missing", "requested", 1), lines: [{ productId: "deleted", quantity: 1, unitPrice: 500 }] },
+    { ...order("empty", "requested", 1), lines: [] }
+  ] };
+  assert.deepEqual(dailyPending(state, "2026-10-01").stocked.map(item => item.id), ["enough"]);
+  const received = addPurchase(state, { id: "purchase", productId: "p2", quantity: 1, unitCost: 100 });
+  assert.deepEqual(dailyPending(received, "2026-10-01").stocked.map(item => item.id), ["enough", "multiple"]);
+  assert.equal(state.products[1].stock, 0);
+});
 
 test("las compras aumentan el stock y actualizan el costo promedio", () => {
   const initial = { ...structuredClone(emptyState), products: [product] };

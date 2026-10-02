@@ -27,6 +27,17 @@ export function availableQuantity(state, productId, exceptOrderId = null) {
   return Number(product?.stock || 0) - reservedQuantity(state, productId, exceptOrderId);
 }
 
+export function dailyPending(state, today) {
+  const active = state.orders.filter(order => !["delivered", "cancelled"].includes(order.status));
+  const byDate = (a, b) => (a.deliveryDate || "").localeCompare(b.deliveryDate || "") || (a.createdAt || "").localeCompare(b.createdAt || "");
+  return {
+    today: active.filter(order => order.deliveryDate === today).sort(byDate),
+    overdue: active.filter(order => order.deliveryDate && order.deliveryDate < today).sort(byDate),
+    unpaid: state.orders.filter(order => order.status === "delivered" && Math.round((orderTotal(order) - paidAmount(state, order.id)) * 100) > 0).sort(byDate),
+    stocked: active.filter(order => order.status === "requested" && order.lines?.length && order.lines.every(line => state.products.some(product => product.id === line.productId) && Number(line.quantity) > 0 && availableQuantity(state, line.productId) >= Number(line.quantity))).sort(byDate)
+  };
+}
+
 export function findProductByCode(products, code) {
   const needle = String(code || "").trim().toLowerCase();
   return needle ? products.find(item => [item.barcode, item.sku].some(value => String(value || "").trim().toLowerCase() === needle)) : undefined;
