@@ -1,4 +1,4 @@
-export const emptyState = { products: [], purchases: [], orders: [], sales: [], stockAdjustments: [], payments: [] };
+export const emptyState = { products: [], purchases: [], orders: [], sales: [], stockAdjustments: [], payments: [], serviceCases: [] };
 export const orderStatuses = { inquiry: "Consulta", reserved: "Reservado", requested: "Por encargo", ready: "Listo para entregar", delivered: "Entregado", cancelled: "Cancelado" };
 export const paymentMethods = { transfer: "Transferencia", cash: "Efectivo", card: "Tarjeta", mercadopago: "Mercado Pago", other: "Otro" };
 export const discountTypes = { none: "Sin descuento", amount: "Importe fijo", percent: "Porcentaje" };

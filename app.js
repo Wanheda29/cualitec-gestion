@@ -1,7 +1,8 @@
-import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, findProductByCode, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary, stockMovements, paymentMovements, dailyPending } from "./domain.js?v=messages-20261001";
-import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readCloud, writeCloud, listCloudHistory, readCloudRevision } from "./cloud.js?v=messages-20261001";
-import { salesReportCsv, paymentReportCsv } from "./reports.js?v=messages-20261001";
-import { messageTypes, orderMessage, whatsappPhone, whatsappUrl } from "./messages.js?v=messages-20261001";
+import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, findProductByCode, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary, stockMovements, paymentMovements, dailyPending } from "./domain.js?v=aftersales-20261002";
+import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readCloud, writeCloud, listCloudHistory, readCloudRevision } from "./cloud.js?v=aftersales-20261002";
+import { salesReportCsv, paymentReportCsv } from "./reports.js?v=aftersales-20261002";
+import { messageTypes, orderMessage, whatsappPhone, whatsappUrl } from "./messages.js?v=aftersales-20261002";
+import { caseTypes, caseStatuses, warrantyInfo, saveServiceCase } from "./aftersales.js?v=aftersales-20261002";
 
 const KEY = "cualitec-gestion-v1";
 let state;
@@ -9,6 +10,7 @@ try { state = normalizeState(JSON.parse(localStorage.getItem(KEY)) || emptyState
 catch { state = structuredClone(emptyState); }
 let view = "dashboard";
 let selectedOrderId = null;
+let selectedCaseId = null, caseSaleId = null;
 let session = null, cloudRevision = 0, cloudEnabled = false, cloudPending = null;
 let cloudCheck = "";
 let salesFilters = { from: "", to: "", channel: "" };
@@ -107,6 +109,24 @@ function orders() {
   return `<div class="grid split">${section("Pedidos", table)}${section("Nuevo pedido", form)}</div><div class="grid two">${section("Cobros y devoluciones", paymentForm)}${section("Historial de pagos", history)}</div>`;
 }
 
+function aftersales() {
+  const current = state.serviceCases.find(item => item.id === selectedCaseId);
+  const sale = state.sales.find(item => item.id === (current?.saleId || caseSaleId)) || state.sales.at(-1);
+  const salesTable = state.sales.length ? rows(["Venta / cliente", "Productos", "Plazo registrado", "", ""], [...state.sales].reverse().map(item => {
+    const info = warrantyInfo(state, item, date());
+    const contact = item.contact || state.orders.find(order => order.id === item.orderId)?.contact || "";
+    return `<tr data-warranty-row data-search="${esc([item.receiptNumber, item.customerName, contact, ...item.lines.map(line => line.productName)].join(" ").toLowerCase())}"><td><strong>${esc(item.receiptNumber || item.id)}</strong><small>${esc(item.customerName)} · ${esc(contact)}<br>Venta: ${esc(item.date)}</small></td><td>${item.lines.map(line => `${esc(line.productName)} × ${esc(line.quantity)}`).join("<br>")}</td><td>${badge(info.status)}<small>${info.end ? `${info.days} días · Hasta ${esc(info.end)}` : "Según condiciones registradas"}</small></td><td><button class="text-button" data-start-case="${esc(item.id)}">Registrar caso</button></td><td><button class="text-button" data-receipt="${esc(item.id)}">Comprobante</button></td></tr>`;
+  }).join("")) : empty("Las ventas entregadas aparecerán aquí.");
+  const form = `<form id="service-case-form" class="form-grid"><input name="id" type="hidden" value="${esc(current?.id || "")}"><label>Venta<select name="saleId" required ${current ? "disabled" : ""}>${state.sales.map(item => option(item.id, `${item.receiptNumber || item.id} · ${item.customerName}`, item.id === sale?.id)).join("")}</select></label><label>Producto de la venta<select name="productId" required ${current ? "disabled" : ""}>${(sale?.lines || []).map(line => option(line.productId, line.productName, line.productId === current?.productId)).join("")}</select></label><label>Tipo<select name="type">${Object.entries(caseTypes).map(([key, label]) => option(key, label, key === (current?.type || "warranty"))).join("")}</select></label><label>Estado<select name="status">${Object.entries(caseStatuses).map(([key, label]) => option(key, label, key === (current?.status || "received"))).join("")}</select></label><label>Fecha de recepción<input name="openedAt" type="date" value="${esc(current?.openedAt || date())}" required></label><label class="wide">Motivo / problema<textarea name="issue" rows="3" required>${esc(current?.issue || "")}</textarea></label><label class="wide">Seguimiento / solución<textarea name="resolution" rows="3">${esc(current?.resolution || "")}</textarea></label><div class="form-actions"><button class="primary" ${sale ? "" : "disabled"}>Guardar caso</button><button class="secondary" id="clear-service-case" type="button">Nuevo caso</button></div></form>`;
+  const cases = [...state.serviceCases].reverse();
+  const history = cases.length ? rows(["Venta / cliente", "Producto", "Caso / estado", "Motivo / seguimiento", ""], cases.map(item => {
+    const original = state.sales.find(sale => sale.id === item.saleId);
+    return `<tr><td>${esc(original?.receiptNumber || item.saleId)}<small>${esc(original?.customerName || "Venta no encontrada")}<br>${esc(item.openedAt)}</small></td><td>${esc(original?.lines.find(line => line.productId === item.productId)?.productName || "Producto")}</td><td>${esc(caseTypes[item.type])}<small>${badge(caseStatuses[item.status])}</small></td><td>${esc(item.issue)}${item.resolution ? `<small>${esc(item.resolution)}</small>` : ""}<details><summary>Historial (${item.history?.length || 0})</summary>${(item.history || []).map(update => `<p>${esc(update.recordedAt.slice(0, 10))} · ${esc(caseStatuses[update.status])}<br>${esc(update.issue)}${update.resolution ? `<br>${esc(update.resolution)}` : ""}</p>`).join("")}</details></td><td><button class="text-button" data-edit-case="${esc(item.id)}">Ver / actualizar</button></td></tr>`;
+  }).join("")) : empty("Todavía no hay casos de posventa registrados.");
+  const active = cases.filter(item => ["received", "reviewing"].includes(item.status)).length;
+  return `${section("Garantías registradas", `<p>El plazo se calcula desde la fecha de la venta usando los días registrados en el comprobante. Podés registrar y atender un caso aunque el plazo haya vencido.</p><label class="catalog-search">Buscar venta, cliente, contacto o producto<input id="warranty-search" placeholder="Comprobante, cliente o producto"></label><p id="warranty-search-empty" class="empty" hidden>No hay ventas para esa búsqueda.</p>${salesTable}`)}${section(current ? "Actualizar caso" : "Nuevo caso de posventa", `<p class="form-hint">Este registro permite seguir la atención. Los movimientos de stock y las devoluciones de dinero se registran en Compras y Pedidos cuando corresponda.</p>${form}`)}${section(`Casos de posventa · ${active} abiertos`, history)}`;
+}
+
 function customers() {
   const map = new Map();
   for (const order of state.orders) { const key = order.contact.trim().toLowerCase(); const previous = map.get(key) || { name: order.customerName, contact: order.contact, count: 0, spent: 0 }; previous.count++; if (order.status === "delivered") previous.spent += orderTotal(order); map.set(key, previous); }
@@ -176,11 +196,11 @@ async function connectCloud() {
 }
 
 function render() {
-  const titles = { dashboard: "Resumen", products: "Productos", purchases: "Compras", orders: "Pedidos", customers: "Clientes", sales: "Ventas", data: "Datos y respaldo" };
+  const titles = { dashboard: "Resumen", products: "Productos", purchases: "Compras", orders: "Pedidos", customers: "Clientes", sales: "Ventas", aftersales: "Garantías y posventa", data: "Datos y respaldo" };
   document.querySelector("#view-title").textContent = titles[view];
   document.querySelector("#today").textContent = new Intl.DateTimeFormat("es-UY", { day: "numeric", month: "long", year: "numeric" }).format(new Date());
   document.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("active", button.dataset.view === view));
-  app.innerHTML = ({ dashboard, products, purchases, orders, customers, sales, data: dataView })[view]();
+  app.innerHTML = ({ dashboard, products, purchases, orders, customers, sales, aftersales, data: dataView })[view]();
   if (view === "orders" && selectedOrderId) {
     app.insertAdjacentHTML("afterbegin", selectedOrderDetails() + messageComposer());
     document.querySelector("#payment-form").elements.orderId.value = selectedOrderId;
@@ -215,6 +235,13 @@ document.addEventListener("click", event => {
   const target = event.target.closest("button"); if (!target) return;
   if (target.dataset.view) { view = target.dataset.view; render(); document.querySelector(".sidebar").classList.remove("open"); }
   if (target.id === "menu") document.querySelector(".sidebar").classList.toggle("open");
+  if (target.dataset.startCase || target.dataset.editCase || target.id === "clear-service-case") {
+    selectedCaseId = target.dataset.editCase || null;
+    caseSaleId = target.dataset.startCase || null;
+    view = "aftersales"; render();
+    const form = document.querySelector("#service-case-form");
+    form.scrollIntoView({ behavior: "smooth", block: "start" }); form.elements.issue.focus({ preventScroll: true });
+  }
   if (target.id === "copy-order-message") {
     const text = document.querySelector("#order-message");
     if (!text.value.trim()) { toast("Escribí un mensaje antes de copiarlo."); return; }
@@ -312,6 +339,16 @@ document.addEventListener("click", event => {
 });
 
 document.addEventListener("submit", async event => {
+  if (event.target.getAttribute("id") === "service-case-form") {
+    event.preventDefault();
+    const form = event.target, data = Object.fromEntries(new FormData(form));
+    try {
+      const next = saveServiceCase(state, { ...data, id: data.id || id("case"), saleId: form.elements.saleId.value, productId: form.elements.productId.value });
+      selectedCaseId = null; caseSaleId = data.saleId || form.elements.saleId.value;
+      persist(next); toast("Caso de posventa guardado.");
+    } catch (error) { toast(error.message); }
+    return;
+  }
   if (event.target.getAttribute("id") === "payment-filter-form") {
     event.preventDefault(); const data = Object.fromEntries(new FormData(event.target));
     if (data.from && data.to && data.from > data.to) { toast("La fecha inicial debe ser anterior a la final."); return; }
@@ -369,6 +406,10 @@ document.addEventListener("submit", async event => {
 });
 
 document.addEventListener("change", async event => {
+  if (event.target.name === "saleId" && event.target.closest("#service-case-form")) {
+    const sale = state.sales.find(item => item.id === event.target.value);
+    event.target.form.elements.productId.innerHTML = (sale?.lines || []).map(line => option(line.productId, line.productName)).join("");
+  }
   if (event.target.id === "message-kind") {
     try { document.querySelector("#order-message").value = orderMessage(state, selectedOrderId, event.target.value); updateMessageDestination(); }
     catch (error) { toast(error.message); }
@@ -389,6 +430,11 @@ document.addEventListener("change", async event => {
   }
 });
 document.addEventListener("input", event => {
+  if (event.target.id === "warranty-search") {
+    const query = event.target.value.trim().toLowerCase(), entries = [...document.querySelectorAll("[data-warranty-row]")];
+    entries.forEach(row => { row.hidden = !row.dataset.search.includes(query); });
+    document.querySelector("#warranty-search-empty").hidden = entries.some(row => !row.hidden);
+  }
   if (["message-phone", "order-message"].includes(event.target.id)) updateMessageDestination();
   if (event.target.closest(".order-line")) event.target.closest(".order-line").removeAttribute("data-pristine");
   if (event.target.id === "product-search") {

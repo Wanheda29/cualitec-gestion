@@ -4,6 +4,8 @@ Panel interno para un emprendimiento que vende tecnología por Instagram, WhatsA
 
 ## Funciones actuales
 
+- Garantías y posventa: búsqueda de ventas por comprobante, cliente, contacto o producto; consulta del plazo registrado desde la fecha de venta; casos de reclamo, cambio o reparación por producto con estados, seguimiento e historial. Los casos se incluyen en respaldos y sincronización. Los ajustes de stock y devoluciones de dinero se registran por separado.
+
 - Mensajes preparados por pedido: detalle, saldo pendiente y datos de entrega con guía DAC cuando esté cargada. Se pueden revisar, editar y copiar para cualquier canal, o abrir WhatsApp con un celular uruguayo o un número internacional. El envío se realiza manualmente en WhatsApp.
 
 - Resumen con pendientes de hoy: entregas previstas, atrasadas, ventas entregadas con saldo por cobrar y encargos con stock disponible. Cada aviso abre el detalle del pedido y permite ir al registro de cobros. Los encargos se evalúan individualmente contra el stock no reservado; el aviso no reserva unidades.

@@ -1,4 +1,4 @@
-import { orderTotal, orderSubtotal, discountAmount, paidAmount, orderStatuses } from "./domain.js?v=messages-20261001";
+import { orderTotal, orderSubtotal, discountAmount, paidAmount, orderStatuses } from "./domain.js?v=aftersales-20261002";
 
 export const messageTypes = { detail: "Detalle del pedido", balance: "Recordatorio de saldo", delivery: "Datos de entrega" };
 const money = value => new Intl.NumberFormat("es-UY", { style: "currency", currency: "UYU" }).format(value);
