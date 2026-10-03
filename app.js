@@ -3,16 +3,22 @@ import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readClo
 import { salesReportCsv, paymentReportCsv } from "./reports.js?v=aftersales-20261002";
 import { messageTypes, orderMessage, whatsappPhone, whatsappUrl } from "./messages.js?v=aftersales-20261002";
 import { caseTypes, caseStatuses, warrantyInfo, saveServiceCase } from "./aftersales.js?v=aftersales-20261002";
+import { canonical, fingerprint, syncDecision } from "./sync.js?v=sync-20261003";
 
 const KEY = "cualitec-gestion-v1";
+const SYNC_KEY = "cualitec-sync-v1";
 let state;
 try { state = normalizeState(JSON.parse(localStorage.getItem(KEY)) || emptyState); }
 catch { state = structuredClone(emptyState); }
+let syncMeta;
+try { syncMeta = JSON.parse(localStorage.getItem(SYNC_KEY)) || null; }
+catch { syncMeta = null; }
 let view = "dashboard";
 let selectedOrderId = null;
 let selectedCaseId = null, caseSaleId = null;
 let session = null, cloudRevision = 0, cloudEnabled = false, cloudPending = null;
 let cloudCheck = "";
+let syncStatus = "checking", draftDirty = false, refreshPromise = null, pendingWrites = 0;
 let salesFilters = { from: "", to: "", channel: "" };
 let paymentFilters = { from: "", to: "", method: "" };
 let stockFilters = { from: "", to: "", productId: "" };
@@ -23,14 +29,37 @@ const money = value => new Intl.NumberFormat("es-UY", { style: "currency", curre
 const date = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
 const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
-const canonical = value => JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
+const syncLabels = { checking: "Consultando nube", saving: "Guardando", synced: "Sincronizado", offline: "Sin conexión", conflict: "Conflicto", remote_available: "Nueva versión disponible", local: "Solo en este navegador" };
+const setSyncStatus = status => {
+  syncStatus = status;
+  const badge = document.querySelector("#sync-status");
+  badge.textContent = syncLabels[status]; badge.className = `sync-status ${status}`;
+  const description = document.querySelector("#sync-description");
+  if (description) description.textContent = syncLabels[status];
+};
+const hasData = value => Object.values(value).some(items => Array.isArray(items) && items.length);
+const acknowledge = async (snapshot, revision) => {
+  syncMeta = { userId: session.user.id, revision, hash: await fingerprint(snapshot) };
+  localStorage.setItem(SYNC_KEY, JSON.stringify(syncMeta));
+};
 const persist = next => {
   state = next; localStorage.setItem(KEY, JSON.stringify(state)); render();
   if (cloudEnabled) {
     const snapshot = structuredClone(next);
-    saveQueue = saveQueue.then(async () => { cloudRevision = await writeCloud(snapshot, cloudRevision); if (view === "data") await refreshHistory(); })
-      .catch(error => { cloudEnabled = false; toast(`No se sincronizó: ${error.message}. Descargá un respaldo y revisá la cuenta.`); render(); });
-  }
+    pendingWrites++; setSyncStatus("saving");
+    saveQueue = saveQueue.then(async () => {
+      const revision = await writeCloud(snapshot, cloudRevision);
+      cloudRevision = revision; await acknowledge(snapshot, revision);
+      if (view === "data") await refreshHistory();
+    }).catch(error => {
+      cloudEnabled = false;
+      setSyncStatus(error.message.includes("VERSION_CONFLICT") ? "conflict" : "offline");
+      toast("No se guardó en Supabase. Los cambios siguen en este navegador; revisá la sincronización.");
+      if (error.message.includes("VERSION_CONFLICT")) setTimeout(() => refreshCloud(), 0);
+    }).finally(() => { pendingWrites--; if (cloudEnabled && !pendingWrites) setSyncStatus("synced"); });
+  } else if (session && syncStatus !== "conflict" && syncStatus !== "remote_available") setSyncStatus("offline");
+  else if (!session) setSyncStatus("local");
+  if (session && syncStatus === "remote_available") setTimeout(() => refreshCloud(), 0);
 };
 const toast = message => { const target = document.querySelector("#toast"); target.textContent = message; target.classList.add("show"); clearTimeout(toast.timer); toast.timer = setTimeout(() => target.classList.remove("show"), 4000); };
 const option = (value, label, selected = false) => `<option value="${esc(value)}" ${selected ? "selected" : ""}>${esc(label)}</option>`;
@@ -170,7 +199,7 @@ function dataView() {
   let account;
   if (!isCloudConfigured()) account = `<p>La nube de Cualitec todavía no está configurada. Los datos se guardan en este navegador.</p>`;
   else if (!session) account = `<p>Iniciá sesión para sincronizar datos entre dispositivos.</p><form id="login-form" class="form-grid"><label>Correo electrónico<input name="email" type="email" autocomplete="username" required></label><label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label><div class="form-actions"><button class="primary">Ingresar</button></div></form>`;
-  else account = `<p>Cuenta: <strong>${esc(session.user.email)}</strong></p><p>${cloudEnabled ? "Sincronización activa" : cloudPending ? "Los datos locales difieren de los de la nube. Descargá un respaldo antes de cargar la versión remota." : "Datos locales pendientes de subir a la nube."}</p><div class="form-actions">${cloudPending ? `<button id="load-cloud" class="secondary">Cargar datos de la nube</button>` : !cloudEnabled ? `<button id="upload-local" class="primary">Subir datos locales</button>` : `<button id="check-cloud" class="secondary">Probar sincronización</button>`}<button id="logout" class="secondary">Cerrar sesión</button></div>${cloudCheck ? `<p>${esc(cloudCheck)}</p>` : ""}<form id="password-form" class="form-grid"><label>Nueva contraseña<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><label>Repetir contraseña<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label><div class="form-actions"><button class="secondary">Guardar contraseña</button></div></form>`;
+  else account = `<p>Cuenta: <strong>${esc(session.user.email)}</strong></p><p>Estado: <strong id="sync-description">${syncLabels[syncStatus]}</strong></p>${cloudPending ? `<p>${syncStatus === "remote_available" ? "Hay datos nuevos en Supabase. Terminá o descartá el formulario sin guardar antes de cargarlos." : "Esta PC y Supabase tienen cambios distintos. Descargá un respaldo antes de elegir cuál conservar."}</p>` : syncStatus === "offline" ? `<p>Los cambios de esta PC siguen guardados aquí. Revisá la conexión para enviarlos a Supabase.</p>` : ""}<div class="form-actions"><button id="refresh-cloud" class="secondary">Revisar versión en Supabase</button>${cloudPending ? `<button id="load-cloud" class="secondary">Usar datos de Supabase</button>${syncStatus === "conflict" ? `<button id="keep-local" class="primary">Conservar datos de esta PC</button>` : ""}` : cloudEnabled ? `<button id="check-cloud" class="secondary">Probar sincronización</button>` : ""}<button id="logout" class="secondary">Cerrar sesión</button></div>${cloudCheck ? `<p>${esc(cloudCheck)}</p>` : ""}<form id="password-form" class="form-grid"><label>Nueva contraseña<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><label>Repetir contraseña<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label><div class="form-actions"><button class="secondary">Guardar contraseña</button></div></form>`;
   const history = !session || !historyAvailable ? "" : section("Historial de recuperación", `<p>Las últimas 50 versiones sincronizadas se guardan en Supabase. Podés recuperar una anterior si cometés un error.</p><div class="form-actions"><button id="refresh-history" class="secondary">Actualizar historial</button></div>${historyStatus ? `<p>${esc(historyStatus)}</p>` : ""}${historySnapshots.length ? rows(["Versión", "Guardada", ""], historySnapshots.map(item => `<tr><td>${item.revision}</td><td>${esc(new Intl.DateTimeFormat("es-UY", { dateStyle: "short", timeStyle: "short" }).format(new Date(item.created_at)))}</td><td><button class="text-button" data-restore-revision="${item.revision}" ${item.revision === cloudRevision || !cloudEnabled ? "disabled" : ""}>Recuperar</button></td></tr>`).join("")) : empty("Todavía no hay versiones disponibles.")}`);
   return `<div class="grid two">${section("Respaldo", `<p>Descargá una copia de tus datos o restaurá un respaldo de Cualitec.</p><div class="form-actions"><button id="export" class="primary">Descargar respaldo</button><label class="file-button">Importar respaldo<input id="import" type="file" accept="application/json,.json" hidden></label></div>`)}${section("Cuenta y almacenamiento", account)}</div>${history}`;
 }
@@ -178,24 +207,68 @@ function dataView() {
 async function refreshHistory() {
   try { historySnapshots = await listCloudHistory(); historyStatus = ""; historyAvailable = true; }
   catch (error) { historySnapshots = []; historyStatus = `No se pudo cargar el historial: ${error.message}`; historyAvailable = false; }
-  if (view === "data") render();
+  if (view === "data" && !draftDirty) render();
 }
 
-async function connectCloud() {
-  session = await getSession();
-  if (!session) { cloudEnabled = false; cloudPending = null; historySnapshots = []; historyStatus = ""; historyAvailable = false; render(); return; }
-  const remote = await readCloud();
-  cloudRevision = Number(remote?.revision || 0);
-  if (remote && canonical(normalizeState(remote.data)) !== canonical(state)) {
-    cloudPending = normalizeState(remote.data); cloudEnabled = false;
-  } else if (!remote && Object.values(state).some(items => items.length)) {
-    cloudPending = null; cloudEnabled = false;
-  } else { cloudPending = null; cloudEnabled = true; }
-  render();
-  refreshHistory();
+async function refreshCloud() {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    await saveQueue;
+    session = await getSession();
+    if (!session) { cloudEnabled = false; cloudPending = null; historySnapshots = []; historyStatus = ""; historyAvailable = false; setSyncStatus("local"); if (!draftDirty) render(); return; }
+    setSyncStatus("checking");
+    const localSnapshot = structuredClone(state);
+    const remote = await readCloud();
+    if (canonical(state) !== canonical(localSnapshot)) { setSyncStatus(pendingWrites ? "saving" : "offline"); setTimeout(() => refreshCloud(), 0); return; }
+    const remoteState = remote ? normalizeState(remote.data) : structuredClone(emptyState);
+    const localHash = await fingerprint(localSnapshot), remoteHash = remote ? await fingerprint(remoteState) : "";
+    if (canonical(state) !== canonical(localSnapshot)) { setSyncStatus(pendingWrites ? "saving" : "offline"); setTimeout(() => refreshCloud(), 0); return; }
+    const knownHash = syncMeta?.userId === session.user.id ? syncMeta.hash : "";
+    cloudRevision = Number(remote?.revision || 0);
+    const decision = syncDecision({ localHash, remoteHash, acknowledgedHash: knownHash, hasLocalData: hasData(localSnapshot), hasRemoteData: !!remote });
+    if (decision === "equal") {
+      cloudPending = null; cloudEnabled = true; await acknowledge(localSnapshot, cloudRevision);
+      setSyncStatus("synced"); if (!draftDirty) render();
+    } else if (decision === "use_remote") {
+      if (draftDirty) {
+        cloudPending = remoteState; cloudEnabled = false; setSyncStatus("remote_available");
+        toast("Hay una versión nueva en Supabase. Guardá o descartá el formulario antes de cargarla.");
+      } else {
+        state = remoteState; localStorage.setItem(KEY, JSON.stringify(state));
+        cloudPending = null; cloudEnabled = true; await acknowledge(remoteState, cloudRevision);
+        setSyncStatus("synced"); render(); toast("Se cargaron los cambios de la otra PC.");
+      }
+    } else if (decision === "push_local") {
+      setSyncStatus("saving");
+      try {
+        const revision = await writeCloud(localSnapshot, cloudRevision);
+        cloudRevision = revision; cloudPending = null; cloudEnabled = true;
+        await acknowledge(localSnapshot, revision);
+        if (canonical(state) !== canonical(localSnapshot)) { cloudEnabled = false; setSyncStatus("offline"); setTimeout(() => refreshCloud(), 0); }
+        else { setSyncStatus("synced"); if (!draftDirty) render(); }
+      } catch (error) {
+        if (!error.message.includes("VERSION_CONFLICT")) throw error;
+        const latest = await readCloud();
+        cloudRevision = Number(latest?.revision || 0); cloudPending = normalizeState(latest.data);
+        cloudEnabled = false; setSyncStatus("conflict"); if (!draftDirty) render();
+        toast("La otra PC guardó cambios mientras se sincronizaba. Elegí qué versión conservar.");
+      }
+    } else {
+      cloudPending = remoteState; cloudEnabled = false; setSyncStatus("conflict"); if (!draftDirty) render();
+      toast("Hay cambios diferentes en esta PC y en Supabase. Elegí qué versión conservar.");
+    }
+    refreshHistory();
+  })().catch(error => {
+    cloudEnabled = false; setSyncStatus("offline"); if (!draftDirty) render();
+    toast(`No se pudo consultar Supabase: ${error.message}. Los datos locales siguen guardados.`);
+  }).finally(() => { refreshPromise = null; });
+  return refreshPromise;
 }
+
+async function connectCloud() { await refreshCloud(); }
 
 function render() {
+  draftDirty = false;
   const titles = { dashboard: "Resumen", products: "Productos", purchases: "Compras", orders: "Pedidos", customers: "Clientes", sales: "Ventas", aftersales: "Garantías y posventa", data: "Datos y respaldo" };
   document.querySelector("#view-title").textContent = titles[view];
   document.querySelector("#today").textContent = new Intl.DateTimeFormat("es-UY", { day: "numeric", month: "long", year: "numeric" }).format(new Date());
@@ -206,6 +279,7 @@ function render() {
     document.querySelector("#payment-form").elements.orderId.value = selectedOrderId;
   }
   if (view === "orders") syncOrderControls(document.querySelector("#order-form"));
+  setSyncStatus(syncStatus);
 }
 
 function syncOrderControls(form, clearInactive = false) {
@@ -233,7 +307,8 @@ function addOrderProductByCode() {
 
 document.addEventListener("click", event => {
   const target = event.target.closest("button"); if (!target) return;
-  if (target.dataset.view) { view = target.dataset.view; render(); document.querySelector(".sidebar").classList.remove("open"); }
+  if (target.id === "sync-status") { view = "data"; render(); if (syncStatus === "remote_available") refreshCloud(); }
+  if (target.dataset.view) { view = target.dataset.view; render(); document.querySelector(".sidebar").classList.remove("open"); if (syncStatus === "remote_available") refreshCloud(); }
   if (target.id === "menu") document.querySelector(".sidebar").classList.toggle("open");
   if (target.dataset.startCase || target.dataset.editCase || target.id === "clear-service-case") {
     selectedCaseId = target.dataset.editCase || null;
@@ -307,6 +382,7 @@ document.addEventListener("click", event => {
     const url = URL.createObjectURL(blob), link = document.createElement("a"); link.href = url; link.download = `cualitec-respaldo-${date()}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   if (target.id === "refresh-history") refreshHistory();
+  if (target.id === "refresh-cloud") refreshCloud();
   if (target.dataset.restoreRevision) {
     const revision = Number(target.dataset.restoreRevision);
     if (!cloudEnabled || !historySnapshots.some(item => item.revision === revision)) { toast("Esa versión ya no está disponible."); return; }
@@ -316,25 +392,41 @@ document.addEventListener("click", event => {
       const nextRevision = await writeCloud(snapshot, cloudRevision);
       state = snapshot; cloudRevision = nextRevision; cloudPending = null; cloudEnabled = true;
       localStorage.setItem(KEY, JSON.stringify(state));
+      await acknowledge(snapshot, nextRevision); setSyncStatus("synced");
       await refreshHistory(); render(); toast("Versión recuperada y sincronizada.");
     }).catch(error => toast(`No se pudo recuperar: ${error.message}`));
   }
-  if (target.id === "logout") signOut().then(() => { session = null; cloudEnabled = false; cloudPending = null; render(); }).catch(error => toast(error.message));
-  if (target.id === "load-cloud" && cloudPending && confirm("Los datos locales se reemplazarán por la versión de Supabase. Descargá un respaldo antes de continuar. ¿Cargar?")) {
-    state = cloudPending; localStorage.setItem(KEY, JSON.stringify(state)); cloudPending = null; cloudEnabled = true; render();
+  if (target.id === "logout") signOut().then(() => { session = null; cloudEnabled = false; cloudPending = null; setSyncStatus("local"); render(); }).catch(error => toast(error.message));
+  if (target.id === "load-cloud" && cloudPending && confirm("Se reemplazarán los datos de este navegador por los de Supabase. Descargá un respaldo antes de continuar. ¿Usar Supabase?")) {
+    saveQueue.then(async () => {
+      const latest = await readCloud();
+      if (!latest) throw new Error("No se encontró la versión de Supabase.");
+      cloudRevision = Number(latest.revision);
+      state = normalizeState(latest.data); localStorage.setItem(KEY, JSON.stringify(state)); cloudPending = null; cloudEnabled = true;
+      await acknowledge(state, cloudRevision); setSyncStatus("synced"); render(); toast("Se cargaron los datos de Supabase.");
+    }).catch(error => toast(error.message));
   }
-  if (target.id === "upload-local") writeCloud(state, cloudRevision).then(revision => { cloudRevision = revision; cloudEnabled = true; refreshHistory(); render(); toast("Datos subidos a Supabase."); }).catch(error => toast(error.message));
+  if (target.id === "keep-local" && cloudPending && confirm("Los datos de esta PC se guardarán como una nueva versión en Supabase. La versión anterior quedará en el historial. ¿Continuar?")) {
+    saveQueue.then(async () => {
+      setSyncStatus("saving");
+      const snapshot = structuredClone(state);
+      const revision = await writeCloud(snapshot, cloudRevision);
+      cloudRevision = revision; cloudPending = null; cloudEnabled = true;
+      await acknowledge(snapshot, revision); setSyncStatus("synced"); await refreshHistory(); render(); toast("Se conservaron y sincronizaron los datos de esta PC.");
+    }).catch(error => { toast(`No se pudo conservar esta versión: ${error.message}`); refreshCloud(); });
+  }
   if (target.id === "check-cloud") {
     target.disabled = true;
     saveQueue = saveQueue.then(async () => {
       const snapshot = structuredClone(state);
       cloudRevision = await writeCloud(snapshot, cloudRevision);
+      await acknowledge(snapshot, cloudRevision); setSyncStatus("synced");
       await refreshHistory();
       const saved = await readCloud();
       if (Number(saved?.revision) !== cloudRevision || canonical(normalizeState(saved.data)) !== canonical(snapshot)) throw new Error("Los datos leídos no coinciden con los guardados.");
       cloudCheck = "Prueba correcta: Supabase guardó y devolvió los datos actuales.";
       render();
-    }).catch(error => { cloudCheck = `No se pudo verificar: ${error.message}`; cloudEnabled = false; render(); });
+    }).catch(error => { cloudCheck = `No se pudo verificar: ${error.message}`; cloudEnabled = false; setSyncStatus("offline"); render(); });
   }
 });
 
@@ -406,6 +498,7 @@ document.addEventListener("submit", async event => {
 });
 
 document.addEventListener("change", async event => {
+  if (event.target.closest("#product-form,#purchase-form,#adjust-form,#order-form,#payment-form,#service-case-form,#password-form,#login-form") || ["message-kind", "message-phone", "order-message"].includes(event.target.id)) draftDirty = true;
   if (event.target.name === "saleId" && event.target.closest("#service-case-form")) {
     const sale = state.sales.find(item => item.id === event.target.value);
     event.target.form.elements.productId.innerHTML = (sale?.lines || []).map(line => option(line.productId, line.productName)).join("");
@@ -430,6 +523,7 @@ document.addEventListener("change", async event => {
   }
 });
 document.addEventListener("input", event => {
+  if (event.target.closest("#product-form,#purchase-form,#adjust-form,#order-form,#payment-form,#service-case-form,#password-form,#login-form") || ["message-phone", "order-message"].includes(event.target.id)) draftDirty = true;
   if (event.target.id === "warranty-search") {
     const query = event.target.value.trim().toLowerCase(), entries = [...document.querySelectorAll("[data-warranty-row]")];
     entries.forEach(row => { row.hidden = !row.dataset.search.includes(query); });
@@ -449,4 +543,7 @@ document.addEventListener("keydown", event => {
 });
 render();
 connectCloud().catch(error => toast(`No se pudo consultar Supabase: ${error.message}`));
+document.addEventListener("visibilitychange", () => { if (!document.hidden && isCloudConfigured()) refreshCloud(); });
+window.addEventListener("focus", () => { if (isCloudConfigured()) refreshCloud(); });
+window.addEventListener("online", () => { if (isCloudConfigured()) refreshCloud(); });
 

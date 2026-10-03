@@ -29,7 +29,9 @@ Requiere Node.js 20 o posterior. Ejecutar `npm run serve` y abrir `http://localh
 
 ## Sincronización
 
-La aplicación guarda una copia local en `localStorage` y se conecta al proyecto Supabase exclusivo de Cualitec configurado en `cloud-config.js`. El esquema de [`supabase/schema.sql`](supabase/schema.sql) ya fue aplicado. La migración [`supabase/history.sql`](supabase/history.sql) agrega un historial de las 50 últimas versiones sincronizadas y una opción para recuperar una versión anterior. La cuenta administradora está activada. En **Datos y respaldo**, el botón **Probar sincronización** comprueba que Supabase guarde y devuelva el estado actual sin crear registros de ejemplo. La sincronización entre dispositivos usa la misma cuenta; si hay datos distintos, la aplicación pide elegir qué versión conservar.
+La aplicación guarda una copia local en `localStorage` y se conecta al proyecto Supabase exclusivo de Cualitec configurado en `cloud-config.js`. El esquema de [`supabase/schema.sql`](supabase/schema.sql) ya fue aplicado. La migración [`supabase/history.sql`](supabase/history.sql) agrega un historial de las 50 últimas versiones sincronizadas y una opción para recuperar una versión anterior. La cuenta administradora está activada.
+
+El indicador de la barra superior muestra si los datos se están guardando, están sincronizados o necesitan atención. Al volver a la pestaña, la aplicación consulta Supabase: si esta PC no tiene cambios pendientes, carga la nueva versión automáticamente. Si las dos versiones cambiaron, muestra **Conflicto** y permite elegir cuál conservar desde **Datos y respaldo**. Antes de elegir, se puede descargar un respaldo local. Un formulario que se está editando no se reemplaza automáticamente. **Probar sincronización** comprueba que Supabase guarde y devuelva el estado actual sin crear registros de ejemplo.
 
 No se importa ni se conecta a la base de Dulce Gestión.
 
