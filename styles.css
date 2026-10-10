@@ -132,3 +132,14 @@ td small{line-height:1.5}
 .badge--stock-available{background:#e3f4ed;color:#176849}
 .inventory-stats .stat-card strong{font-variant-numeric:tabular-nums}
 @media(max-width:700px){.inventory-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.inventory-filter{flex:1 1 auto}}
+
+/* Venta rápida */
+.hero-link{border:0;background:transparent;color:#e9dff0;font-size:12px;font-weight:750;text-decoration:underline;text-underline-offset:3px}
+.hero-link:hover{color:#fff}
+#quick-sale-form{max-width:980px}
+#quick-sale-form>.wide>label{display:flex;flex-direction:column;gap:7px;color:#4c5a6b;font-size:12px;font-weight:700}
+#quick-sale-form>.wide>label input{width:100%;min-height:44px;margin-top:2px;padding:11px 12px;border:1px solid #d7e0e8;border-radius:8px;outline:0;color:#1d2b42;background:white;font-size:14px}
+.quick-sale-total{display:flex;flex-wrap:wrap;gap:12px;padding:15px 17px;border:1px solid #cfe2e9;border-radius:10px;background:#f0f7fa}
+.quick-sale-total span{display:flex;flex-direction:column;gap:3px;min-width:190px;color:#526477;font-size:12px}
+.quick-sale-total strong{color:#21384b;font-size:19px;font-variant-numeric:tabular-nums}
+@media(max-width:700px){.quick-sale-total{flex-direction:column}.hero-link{align-self:flex-start}}

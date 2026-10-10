@@ -1,4 +1,4 @@
-import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, findProductByCode, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary, stockMovements, paymentMovements, dailyPending } from "./domain.js?v=aftersales-20261002";
+import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, findProductByCode, addPurchase, adjustStock, saveOrder, deliverOrder, recordQuickSale, orderTotal, paidAmount, recordPayment, monthlySummary, stockMovements, paymentMovements, dailyPending } from "./domain.js?v=quick-sale-20261010";
 import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readCloud, writeCloud, listCloudHistory, readCloudRevision } from "./cloud.js?v=aftersales-20261002";
 import { salesReportCsv, paymentReportCsv, salesVisualSummary } from "./reports.js?v=charts-20261010";
 import { messageTypes, orderMessage, whatsappPhone, whatsappUrl } from "./messages.js?v=aftersales-20261002";
@@ -67,6 +67,11 @@ const option = (value, label, selected = false) => `<option value="${esc(value)}
 const productOptions = selected => state.products.map(item => option(item.id, `${item.name}${item.variant ? ` · ${item.variant}` : ""}`, item.id === selected)).join("");
 const productName = productId => { const item = state.products.find(product => product.id === productId); return item ? `${item.name}${item.variant ? ` · ${item.variant}` : ""}` : "Producto eliminado"; };
 const orderLine = (line = {}) => `<div class="order-line" ${Object.keys(line).length ? "" : 'data-pristine="true"'}><label>Producto / variante<select name="productId" required>${productOptions(line.productId)}</select></label><label>Cantidad<input name="quantity" type="number" min="1" step="1" value="${esc(line.quantity ?? 1)}" required></label><label>Precio unitario<input name="unitPrice" type="number" min="0" step="0.01" value="${esc(line.unitPrice ?? state.products.find(item => item.id === (line.productId || state.products[0]?.id))?.price ?? "")}" required></label><button class="text-button remove-line" type="button">Quitar</button></div>`;
+const quickProducts = () => state.products.filter(item => availableQuantity(state, item.id) > 0);
+const quickSaleLine = (line = {}) => {
+  const products = quickProducts(), selected = line.productId || products[0]?.id;
+  return `<div class="order-line" ${Object.keys(line).length ? "" : 'data-pristine="true"'}><label>Producto / variante<select name="productId" required>${products.map(item => option(item.id, `${item.name}${item.variant ? ` · ${item.variant}` : ""} · ${availableQuantity(state, item.id)} disp.`, item.id === selected)).join("")}</select></label><label>Cantidad<input name="quantity" type="number" min="1" step="1" value="${esc(line.quantity ?? 1)}" required></label><label>Precio unitario<input name="unitPrice" type="number" min="0" step="0.01" value="${esc(line.unitPrice ?? state.products.find(item => item.id === selected)?.price ?? "")}" required></label><button class="text-button remove-line" type="button">Quitar</button></div>`;
+};
 const section = (title, body, action = "") => `<section class="panel"><div class="panel-head"><h2>${title}</h2>${action}</div>${body}</section>`;
 const empty = label => `<p class="empty">${label}</p>`;
 const badge = (label, tone = "") => `<span class="badge${/^[a-z-]+$/.test(tone) ? ` badge--${tone}` : ""}">${esc(label)}</span>`;
@@ -93,7 +98,7 @@ function dashboard() {
     ["Encargos con stock disponible", attention.stocked, "No hay encargos con stock suficiente."]
   ];
   const pendingPanels = groups.map(([title, orders, message]) => `<article class="pending-group"><h3>${title} <span class="badge">${orders.length}</span></h3>${orders.length ? rows(["Cliente / productos", "Entrega", "Saldo", ""], orders.map(item => `<tr><td><strong>${esc(item.customerName)}</strong><small>${item.lines.map(line => `${esc(productName(line.productId))} × ${esc(line.quantity)}`).join("<br>")}</small></td><td>${esc(item.deliveryDate || "Sin fecha")}<small>${item.deliveryMethod === "dac" ? "DAC" : "Montevideo"}</small></td><td>${money(orderTotal(item) - paidAmount(state, item.id))}</td><td><button class="text-button" data-open-order="${esc(item.id)}" aria-label="Ver pedido de ${esc(item.customerName)}">Ver pedido</button></td></tr>`).join("")) : empty(message)}</article>`).join("");
-  return `<div class="hero"><div class="hero-copy"><span class="eyebrow">PANEL DE CUALITEC</span><h2>Tu negocio, al día.</h2><p>Pedidos, stock y resultados de tus ventas por redes, en un solo lugar.</p></div><div class="hero-actions"><button class="primary" data-view="orders">+ Nuevo pedido</button><span>${attentionCount} ${attentionCount === 1 ? "aviso" : "avisos"} para revisar</span></div></div>
+  return `<div class="hero"><div class="hero-copy"><span class="eyebrow">PANEL DE CUALITEC</span><h2>Tu negocio, al día.</h2><p>Pedidos, stock y resultados de tus ventas por redes, en un solo lugar.</p></div><div class="hero-actions"><button class="primary" data-view="quick-sale">+ Venta rápida</button><button class="hero-link" data-view="orders">Nuevo pedido</button><span>${attentionCount} ${attentionCount === 1 ? "aviso" : "avisos"} para revisar</span></div></div>
     <div class="stats dashboard-stats"><article class="stat-card stat-sales"><span>Ventas del mes</span><strong>${money(summary.revenue)}</strong><small>${summary.sales} operaciones</small></article><article class="stat-card stat-margin"><span>Margen de productos</span><strong>${money(summary.revenue - summary.shipping - summary.cost)}</strong><small>Ventas menos costo de mercadería y envíos</small></article><article class="stat-card stat-orders"><span>Pedidos activos</span><strong>${pending.length}</strong><small>Por atender o entregar</small></article><article class="stat-card stat-stock"><span>Stock bajo</span><strong>${low.length}</strong><small>Productos para reponer</small></article></div>
     ${section("Pendientes de hoy", `<p class="form-hint">Entregas, cobros y encargos que necesitan atención. Un pedido puede aparecer en más de un grupo. El stock de cada encargo se comprueba por separado y todavía no queda reservado.</p><div class="grid two">${pendingPanels}</div>`)}
     <div class="grid two">${section("Pedidos en curso", pending.length ? rows(["Cliente", "Productos", "Estado", "Entrega"], pending.slice(-5).reverse().map(item => `<tr><td>${esc(item.customerName)}</td><td>${item.lines.map(line => `${esc(productName(line.productId))} × ${line.quantity}`).join("<br>")}</td><td>${badge(orderStatuses[item.status], item.status)}</td><td>${esc(item.deliveryDate || "Sin fecha")}</td></tr>`).join("")) : empty("Todavía no hay pedidos activos."))}
@@ -132,6 +137,22 @@ function purchases() {
   const filterForm = `<form id="stock-filter-form" class="form-grid"><label>Desde<input name="from" type="date" value="${esc(stockFilters.from)}"></label><label>Hasta<input name="to" type="date" value="${esc(stockFilters.to)}"></label><label>Producto<select name="productId">${option("", "Todos los productos", !stockFilters.productId)}${state.products.map(item => option(item.id, productName(item.id), item.id === stockFilters.productId)).join("")}</select></label><div class="form-actions"><button class="primary">Aplicar filtros</button><button id="clear-stock-filters" type="button" class="secondary">Limpiar</button></div></form>`;
   const movementTable = movements.length ? rows(["Fecha", "Producto", "Movimiento", "Detalle", "Unidades"], movements.map(item => `<tr><td>${esc(item.date || "—")}</td><td>${esc(item.productName)}</td><td>${esc(item.type)}</td><td>${esc(item.detail)}</td><td class="${item.quantity < 0 ? "stock-out" : "stock-in"}">${item.quantity > 0 ? "+" : ""}${item.quantity}</td></tr>`).join("")) : empty("No hay movimientos de stock para los filtros elegidos.");
   return `<div class="grid two">${section("Entrada de mercadería", form)}${section("Ajuste de inventario", adjustments)}</div>${section("Movimientos de stock", `${filterForm}<p class="form-hint">Incluye entradas por compras, ajustes y salidas al entregar ventas. Las reservas reducen lo disponible, pero no el stock físico.</p>${movementTable}`)}${section("Historial de compras", history)}`;
+}
+
+function quickSale() {
+  const available = quickProducts().length;
+  const form = `<form id="quick-sale-form" class="form-grid"><label>Cliente<input name="customerName" required placeholder="Nombre del cliente"></label><label>Contacto / usuario de red<input name="contact" required placeholder="Teléfono o @usuario"></label><label>Canal<select name="channel">${["Instagram", "WhatsApp", "Facebook", "Otro"].map(item => option(item, item)).join("")}</select></label><label>Fecha de venta<input name="saleDate" type="date" value="${date()}" required></label><div class="wide"><label>Código de barras o SKU<input id="quick-sale-code" autocomplete="off" placeholder="Escribí o escaneá el código"></label><div class="form-actions"><button id="quick-add-by-code" class="secondary" type="button" ${available ? "" : "disabled"}>Agregar por código</button></div></div><div class="wide"><div id="quick-sale-lines" class="order-lines">${available ? quickSaleLine() : ""}</div><button id="quick-add-line" class="secondary" type="button" ${available ? "" : "disabled"}>Agregar producto</button></div><label>Descuento manual<select name="discountType">${Object.entries(discountTypes).map(([key, value]) => option(key, value)).join("")}</select></label><label>Valor del descuento<input name="discountValue" type="number" min="0" step="0.01" value="0" required></label><label>Entrega<select name="deliveryMethod"><option value="montevideo">Montevideo · en el día</option><option value="dac">Interior · DAC</option></select></label><label>Envío<select name="shippingPayer"><option value="recipient_on_delivery">Destinatario paga al recibir</option><option value="included_in_sale">Cualitec cobra el envío</option></select></label><label>Cargo de envío<input name="shippingAmount" type="number" min="0" step="0.01" value="0" required></label><label>Garantía (días)<input name="warrantyDays" type="number" min="0" step="1" value="30" required></label><label>Importe cobrado ahora<input name="paymentAmount" type="number" min="0" step="0.01" value="0" required></label><label>Medio de pago<select name="paymentMethod">${Object.entries(paymentMethods).map(([key, value]) => option(key, value)).join("")}</select></label><p class="form-hint wide">Si todavía no cobraste, dejá el importe en 0. Podés registrar el cobro más adelante desde Pedidos. Usá esta opción cuando la mercadería ya fue entregada; para entregas pendientes, creá un pedido.</p><div class="quick-sale-total wide" aria-live="polite"><span>Total estimado <strong id="quick-sale-total">${money(0)}</strong></span><span>Saldo luego del cobro <strong id="quick-sale-balance">${money(0)}</strong></span></div><div class="form-actions"><button class="primary" ${available ? "" : "disabled"}>Registrar venta y abrir comprobante</button><button id="clear-quick-sale" class="secondary" type="button">Limpiar</button></div></form>`;
+  return `${section("Venta rápida", `<p class="form-hint">Registra una venta entregada con stock disponible y genera el comprobante. Las unidades reservadas para otros pedidos no aparecen como disponibles.</p>${available ? "" : '<p class="empty">No hay productos con unidades disponibles. Registrá una entrada de mercadería en Compras.</p>'}${form}`)}`;
+}
+
+function syncQuickSaleTotal() {
+  const form = document.querySelector("#quick-sale-form");
+  if (!form) return;
+  const lines = [...form.querySelectorAll(".order-line")].map(row => ({ productId: row.querySelector('[name="productId"]').value, quantity: Number(row.querySelector('[name="quantity"]').value || 0), unitPrice: Number(row.querySelector('[name="unitPrice"]').value || 0) }));
+  const total = orderTotal({ lines, discountType: form.elements.discountType.value, discountValue: Number(form.elements.discountValue.value || 0), shippingPayer: form.elements.shippingPayer.value, shippingAmount: Number(form.elements.shippingAmount.value || 0) });
+  const paid = Number(form.elements.paymentAmount.value || 0);
+  document.querySelector("#quick-sale-total").textContent = money(total);
+  document.querySelector("#quick-sale-balance").textContent = money(Math.max(0, total - paid));
 }
 
 function selectedOrderDetails() {
@@ -299,7 +320,7 @@ async function connectCloud() { await refreshCloud(); }
 
 function render() {
   draftDirty = false;
-  const titles = { dashboard: "Resumen", products: "Productos", purchases: "Compras", orders: "Pedidos", customers: "Clientes", sales: "Ventas", aftersales: "Garantías y posventa", data: "Datos y respaldo" };
+  const titles = { dashboard: "Resumen", "quick-sale": "Venta rápida", products: "Productos", purchases: "Compras", orders: "Pedidos", customers: "Clientes", sales: "Ventas", aftersales: "Garantías y posventa", data: "Datos y respaldo" };
   document.querySelector("#view-title").textContent = titles[view];
   document.querySelector("#today").textContent = new Intl.DateTimeFormat("es-UY", { day: "numeric", month: "long", year: "numeric" }).format(new Date());
   document.querySelectorAll("[data-view]").forEach(button => {
@@ -307,12 +328,13 @@ function render() {
     button.classList.toggle("active", active);
     if (button.closest(".sidebar")) { if (active) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current"); }
   });
-  app.innerHTML = ({ dashboard, products, purchases, orders, customers, sales, aftersales, data: dataView })[view]();
+  app.innerHTML = ({ dashboard, "quick-sale": quickSale, products, purchases, orders, customers, sales, aftersales, data: dataView })[view]();
   if (view === "orders" && selectedOrderId) {
     app.insertAdjacentHTML("afterbegin", selectedOrderDetails() + messageComposer());
     document.querySelector("#payment-form").elements.orderId.value = selectedOrderId;
   }
   if (view === "orders") syncOrderControls(document.querySelector("#order-form"));
+  if (view === "quick-sale") { syncOrderControls(document.querySelector("#quick-sale-form")); syncQuickSaleTotal(); }
   setSyncStatus(syncStatus);
 }
 
@@ -325,18 +347,21 @@ function syncOrderControls(form, clearInactive = false) {
   form.elements.shippingAmount.disabled = shipping;
 }
 
-function addOrderProductByCode() {
-  const input = document.querySelector("#order-code"), product = findProductByCode(state.products, input.value);
+function addProductByCode(quick = false) {
+  const input = document.querySelector(quick ? "#quick-sale-code" : "#order-code"), product = findProductByCode(state.products, input.value);
   if (!product) { toast("No se encontró un producto con ese código. Revisá el catálogo."); input.focus(); return; }
-  const container = document.querySelector("#order-lines");
+  if (quick && availableQuantity(state, product.id) <= 0) { toast("Esa variante no tiene unidades disponibles para una venta rápida."); input.focus(); return; }
+  const container = document.querySelector(quick ? "#quick-sale-lines" : "#order-lines");
+  const line = quick ? quickSaleLine : orderLine;
   const existing = [...container.querySelectorAll(".order-line")].find(row => row.querySelector('[name="productId"]').value === product.id && !row.hasAttribute("data-pristine"));
   if (existing) existing.querySelector('[name="quantity"]').value = Number(existing.querySelector('[name="quantity"]').value || 0) + 1;
   else {
     const pristine = container.querySelector('[data-pristine="true"]');
-    if (pristine) pristine.outerHTML = orderLine({ productId: product.id, quantity: 1, unitPrice: product.price });
-    else container.insertAdjacentHTML("beforeend", orderLine({ productId: product.id, quantity: 1, unitPrice: product.price }));
+    if (pristine) pristine.outerHTML = line({ productId: product.id, quantity: 1, unitPrice: product.price });
+    else container.insertAdjacentHTML("beforeend", line({ productId: product.id, quantity: 1, unitPrice: product.price }));
   }
-  input.value = ""; input.focus(); toast(`${product.name}${product.variant ? ` · ${product.variant}` : ""} agregado al pedido.`);
+  if (quick) syncQuickSaleTotal();
+  input.value = ""; input.focus(); toast(`${product.name}${product.variant ? ` · ${product.variant}` : ""} agregado a ${quick ? "la venta" : "el pedido"}.`);
 }
 
 document.addEventListener("click", event => {
@@ -410,9 +435,12 @@ document.addEventListener("click", event => {
     form.scrollIntoView({ behavior: "smooth" });
   }
   if (target.id === "add-line") document.querySelector("#order-lines").insertAdjacentHTML("beforeend", orderLine());
-  if (target.id === "add-by-code") addOrderProductByCode();
-  if (target.classList.contains("remove-line")) { const container = target.closest("#order-lines"); if (container.children.length > 1) target.closest(".order-line").remove(); else toast("El pedido necesita al menos un producto."); }
+  if (target.id === "quick-add-line") { document.querySelector("#quick-sale-lines").insertAdjacentHTML("beforeend", quickSaleLine()); syncQuickSaleTotal(); }
+  if (target.id === "add-by-code") addProductByCode();
+  if (target.id === "quick-add-by-code") addProductByCode(true);
+  if (target.classList.contains("remove-line")) { const container = target.closest("#order-lines,#quick-sale-lines"); if (container.children.length > 1) { target.closest(".order-line").remove(); if (container.id === "quick-sale-lines") syncQuickSaleTotal(); } else toast("Se necesita al menos un producto."); }
   if (target.id === "clear-order") { const form = document.querySelector("#order-form"); form.reset(); form.elements.id.value = ""; form.querySelector("#order-lines").innerHTML = state.products.length ? orderLine() : ""; syncOrderControls(form, true); }
+  if (target.id === "clear-quick-sale") { const form = document.querySelector("#quick-sale-form"); form.reset(); form.querySelector("#quick-sale-lines").innerHTML = quickProducts().length ? quickSaleLine() : ""; syncOrderControls(form, true); syncQuickSaleTotal(); draftDirty = false; }
   if (target.id === "clear-sales-filters") { salesFilters = { from: "", to: "", channel: "" }; render(); }
   if (target.id === "clear-payment-filters") { paymentFilters = { from: "", to: "", method: "" }; render(); }
   if (target.id === "clear-stock-filters") { stockFilters = { from: "", to: "", productId: "" }; render(); }
@@ -527,9 +555,18 @@ document.addEventListener("submit", async event => {
     catch (error) { toast(error.message); }
     return;
   }
-  const form = event.target, formId = form.getAttribute("id"); if (!["product-form", "purchase-form", "adjust-form", "order-form", "payment-form"].includes(formId)) return;
+  const form = event.target, formId = form.getAttribute("id"); if (!["product-form", "purchase-form", "adjust-form", "order-form", "payment-form", "quick-sale-form"].includes(formId)) return;
   event.preventDefault(); const data = Object.fromEntries(new FormData(form));
   try {
+    if (formId === "quick-sale-form") {
+      const lines = [...form.querySelectorAll(".order-line")].map(row => ({ productId: row.querySelector('[name="productId"]').value, quantity: Number(row.querySelector('[name="quantity"]').value), unitPrice: Number(row.querySelector('[name="unitPrice"]').value) }));
+      const order = { id: id("order"), customerName: data.customerName.trim(), contact: data.contact.trim(), channel: data.channel, lines, discountType: data.discountType, discountValue: Number(data.discountValue || 0), deliveryMethod: data.deliveryMethod, deliveryDate: data.saleDate, shippingPayer: data.shippingPayer, shippingAmount: Number(data.shippingAmount || 0), warrantyDays: Number(data.warrantyDays), createdAt: new Date().toISOString() };
+      const next = recordQuickSale(state, { order, saleDate: data.saleDate, paymentAmount: Number(data.paymentAmount), paymentMethod: data.paymentMethod });
+      persist(next);
+      window.open(`receipt.html?sale=${encodeURIComponent(next.sales.at(-1).id)}`, "_blank", "noopener");
+      toast("Venta registrada. El comprobante está disponible en Ventas.");
+      return;
+    }
     if (formId === "product-form") {
       const previous = state.products.find(item => item.id === data.id);
       const product = { id: data.id || id("product"), name: data.name.trim(), category: data.category.trim(), variant: data.variant.trim(), barcode: data.barcode.trim(), sku: data.sku.trim(), price: Number(data.price), minStock: Number(data.minStock), stock: Number(previous?.stock || 0), averageCost: Number(previous?.averageCost || 0) };
@@ -554,7 +591,7 @@ document.addEventListener("submit", async event => {
 });
 
 document.addEventListener("change", async event => {
-  if (event.target.closest("#product-form,#purchase-form,#adjust-form,#order-form,#payment-form,#service-case-form,#password-form,#login-form") || ["message-kind", "message-phone", "order-message"].includes(event.target.id)) draftDirty = true;
+  if (event.target.closest("#product-form,#purchase-form,#adjust-form,#order-form,#payment-form,#quick-sale-form,#service-case-form,#password-form,#login-form") || ["message-kind", "message-phone", "order-message"].includes(event.target.id)) draftDirty = true;
   if (event.target.name === "saleId" && event.target.closest("#service-case-form")) {
     const sale = state.sales.find(item => item.id === event.target.value);
     event.target.form.elements.productId.innerHTML = (sale?.lines || []).map(line => option(line.productId, line.productName)).join("");
@@ -564,7 +601,8 @@ document.addEventListener("change", async event => {
     catch (error) { toast(error.message); }
   }
   if (event.target.closest(".order-line")) event.target.closest(".order-line").removeAttribute("data-pristine");
-  if (["discountType", "shippingPayer"].includes(event.target.name) && event.target.closest("#order-form")) syncOrderControls(event.target.form, true);
+  if (["discountType", "shippingPayer"].includes(event.target.name) && event.target.closest("#order-form,#quick-sale-form")) syncOrderControls(event.target.form, true);
+  if (event.target.closest("#quick-sale-form")) syncQuickSaleTotal();
   if (event.target.id === "import") {
     try {
       const input = JSON.parse(await event.target.files[0].text());
@@ -579,7 +617,8 @@ document.addEventListener("change", async event => {
   }
 });
 document.addEventListener("input", event => {
-  if (event.target.closest("#product-form,#purchase-form,#adjust-form,#order-form,#payment-form,#service-case-form,#password-form,#login-form") || ["message-phone", "order-message"].includes(event.target.id)) draftDirty = true;
+  if (event.target.closest("#product-form,#purchase-form,#adjust-form,#order-form,#payment-form,#quick-sale-form,#service-case-form,#password-form,#login-form") || ["message-phone", "order-message"].includes(event.target.id)) draftDirty = true;
+  if (event.target.closest("#quick-sale-form")) syncQuickSaleTotal();
   if (event.target.id === "warranty-search") {
     const query = event.target.value.trim().toLowerCase(), entries = [...document.querySelectorAll("[data-warranty-row]")];
     entries.forEach(row => { row.hidden = !row.dataset.search.includes(query); });
@@ -592,7 +631,8 @@ document.addEventListener("input", event => {
   }
 });
 document.addEventListener("keydown", event => {
-  if (event.target.id === "order-code" && event.key === "Enter") { event.preventDefault(); addOrderProductByCode(); }
+  if (event.target.id === "order-code" && event.key === "Enter") { event.preventDefault(); addProductByCode(); }
+  if (event.target.id === "quick-sale-code" && event.key === "Enter") { event.preventDefault(); addProductByCode(true); }
 });
 render();
 connectCloud().catch(error => toast(`No se pudo consultar Supabase: ${error.message}`));

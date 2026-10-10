@@ -120,6 +120,17 @@ export function deliverOrder(state, orderId, date) {
   return { ...state, products, orders: state.orders.map(item => item.id === orderId ? { ...item, status: "delivered", deliveredAt: date } : item), sales: [...state.sales, sale] };
 }
 
+export function recordQuickSale(state, { order, saleDate, paymentAmount = 0, paymentMethod = "transfer" }) {
+  if (!order?.id || state.orders.some(item => item.id === order.id)) throw new Error("La venta rápida necesita un identificador nuevo.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(saleDate || "")) throw new Error("Revisá la fecha de venta.");
+  const amount = Number(paymentAmount);
+  if (!Number.isFinite(amount) || amount < 0) throw new Error("Revisá el importe cobrado.");
+  const saved = saveOrder(state, { ...order, status: "inquiry", deposit: 0 });
+  const delivered = deliverOrder(saved, order.id, saleDate);
+  if (!amount) return delivered;
+  return recordPayment(delivered, { id: `payment_${crypto.randomUUID()}`, orderId: order.id, kind: "payment", amount, method: paymentMethod, date: saleDate, note: "Cobro de venta rápida" });
+}
+
 export function monthlySummary(state, month) {
   return state.sales.filter(sale => sale.date.startsWith(month)).reduce((summary, sale) => {
     summary.sales += 1; summary.revenue += Number(sale.total);

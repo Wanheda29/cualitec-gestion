@@ -15,6 +15,7 @@ Panel interno para un emprendimiento que vende tecnología por Instagram, WhatsA
 - Registro de compras y ajustes de stock con motivo.
 - Registro de movimientos de stock con compras, ajustes y salidas por ventas, filtrable por producto y rango de fechas.
 - Pedidos con varios productos como consulta, reserva de stock o encargo sin stock. Una entrega descuenta unidades y crea una venta una sola vez.
+- Venta rápida de productos disponibles: registra en una operación la entrega, el descuento manual, el cobro total o parcial y el comprobante. Los productos reservados para otros pedidos no se pueden vender por esta vía.
 - Descuentos manuales por importe fijo o porcentaje. Se pueden agregar al pedido antes de entregarlo; no se aplican automáticamente.
 - Cobros parciales y devoluciones con fecha, medio de pago e historial. El saldo se calcula por pedido; las señas registradas antes de esta actualización se conservan.
 - Entrega en el día en Montevideo o por DAC al interior. Por defecto, el destinatario paga el envío al recibir; también se puede cargar un envío cobrado por Cualitec.

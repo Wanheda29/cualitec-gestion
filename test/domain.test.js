@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyState, normalizeState, findProductByCode, addPurchase, adjustStock, saveOrder, availableQuantity, deliverOrder, orderTotal, monthlySummary, paidAmount, recordPayment, stockMovements, paymentMovements } from "../domain.js";
+import { emptyState, normalizeState, findProductByCode, addPurchase, adjustStock, saveOrder, availableQuantity, deliverOrder, recordQuickSale, orderTotal, monthlySummary, paidAmount, recordPayment, stockMovements, paymentMovements } from "../domain.js";
 import { salesReportCsv, paymentReportCsv, salesVisualSummary } from "../reports.js";
 import { dailyPending } from "../domain.js";
 
@@ -64,6 +64,26 @@ test("un pedido por encargo se entrega al ingresar stock y crea una sola venta",
   assert.equal(delivered.sales.length, 1);
   assert.deepEqual(monthlySummary(delivered, "2026-09"), { sales: 1, revenue: 1000, shipping: 0, discount: 0, cost: 600 });
   assert.throws(() => deliverOrder(delivered, "o1", "2026-09-28"), /nuevamente/);
+});
+
+test("la venta rápida descuenta stock, registra cobro y genera comprobante", () => {
+  const initial = { ...structuredClone(emptyState), products: [{ ...product, stock: 2, averageCost: 600 }] };
+  const next = recordQuickSale(initial, { order: { ...order("quick", "inquiry", 1), discountType: "amount", discountValue: 100, shippingPayer: "recipient_on_delivery", shippingAmount: 0, warrantyDays: 30 }, saleDate: "2026-10-10", paymentAmount: 900, paymentMethod: "transfer" });
+  assert.equal(next.products[0].stock, 1);
+  assert.equal(next.orders[0].status, "delivered");
+  assert.equal(next.sales[0].receiptNumber, "A001");
+  assert.equal(next.sales[0].total, 900);
+  assert.equal(paidAmount(next, "quick"), 900);
+  assert.equal(next.payments[0].method, "transfer");
+  assert.equal(initial.products[0].stock, 2);
+});
+
+test("la venta rápida respeta reservas y no deja registros parciales", () => {
+  const initial = { ...structuredClone(emptyState), products: [{ ...product, stock: 1 }], orders: [order("reserved", "reserved", 1)] };
+  assert.throws(() => recordQuickSale(initial, { order: order("quick", "inquiry", 1), saleDate: "2026-10-10", paymentAmount: 1000 }), /stock/);
+  assert.throws(() => recordQuickSale({ ...initial, orders: [] }, { order: order("quick", "inquiry", 1), saleDate: "2026-10-10", paymentAmount: 1001 }), /saldo/);
+  assert.equal(initial.sales.length, 0);
+  assert.equal(initial.payments.length, 0);
 });
 
 test("un pedido con dos variantes reserva y descuenta ambas al entregar", () => {
