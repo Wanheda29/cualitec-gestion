@@ -39,3 +39,9 @@ Cuando las dos PC cambiaron registros diferentes desde una misma versión, la ap
 
 No se importa ni se conecta a la base de Dulce Gestión.
 
+## Actividad del proyecto Supabase
+
+El flujo de GitHub Actions [`supabase-activity.yml`](.github/workflows/supabase-activity.yml) consulta tres veces al día una fila pública y sin datos comerciales de la tabla `keepalive`. El esquema para esa tabla está en [`supabase/keepalive.sql`](supabase/keepalive.sql). La tarea también se puede ejecutar manualmente desde la pestaña **Actions** del repositorio. Si la consulta falla, el flujo queda marcado como fallido.
+
+La tarea utiliza únicamente la clave publicable que ya usa la página. No accede a ventas, clientes ni otros datos privados. Supabase evalúa la actividad durante la semana y no garantiza que estas consultas eviten una pausa. Además, GitHub puede desactivar tareas programadas de repositorios públicos tras 60 días sin actividad en el repositorio; conviene conservar los avisos por correo de Supabase y los respaldos de los datos.
+

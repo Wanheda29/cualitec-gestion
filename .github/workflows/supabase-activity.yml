@@ -1,0 +1,22 @@
+name: Consultar Supabase
+
+on:
+  schedule:
+    # Tres consultas diarias, fuera del inicio de cada hora (UTC).
+    - cron: "17 11,17,23 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Consultar fila pública de verificación
+        run: node scripts/check-supabase.mjs
