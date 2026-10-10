@@ -6,3 +6,59 @@
 .pending-group{min-width:0;padding:16px;border:1px solid #e6ebf1;border-radius:10px}.pending-group h3{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px;font-size:14px}.pending-group .empty{padding:12px 0;margin:0}.pending-group .text-button{white-space:nowrap}#selected-order{scroll-margin-top:20px}#selected-order:focus-visible{outline:2px solid #10af96;outline-offset:6px}
 .payment-stats{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:18px}.payment-stats article{box-shadow:none}@media(max-width:700px){.payment-stats{grid-template-columns:1fr}}
 .topbar-actions{display:flex;align-items:flex-end;flex-direction:column;gap:9px}.sync-status{border:1px solid #d9e4ed;border-radius:999px;padding:7px 11px;background:#f4f7fa;color:#52647a;font-size:11px;font-weight:700;white-space:nowrap}.sync-status::before{content:"";display:inline-block;width:7px;height:7px;margin-right:7px;border-radius:50%;background:currentColor}.sync-status.synced{background:#e4f7f1;border-color:#b9e8da;color:#087b65}.sync-status.saving,.sync-status.checking{background:#e9f3ff;border-color:#c8def9;color:#2866a3}.sync-status.offline,.sync-status.conflict{background:#fff0eb;border-color:#f2c9b9;color:#ad4b2b}.sync-status.remote_available{background:#fff7df;border-color:#f0dfa6;color:#8b6511}@media(max-width:700px){.topbar-actions{margin-left:auto}.sync-status{max-width:155px;overflow:hidden;text-overflow:ellipsis}}
+
+/* Identidad Cualitec y jerarquía del panel */
+:root{--brand-plum:#3a2b43;--brand-blue:#116c8c;--brand-blue-dark:#09546f;--surface:#fff;--canvas:#f5f7fa;--line:#e3e8ee;background:var(--canvas);color:#283241}
+.sidebar{width:252px;padding:18px 14px;background:var(--brand-plum);overflow-y:auto}
+.brand{position:relative;display:flex;flex-direction:column;align-items:center;gap:0;padding:0 10px 21px;margin-bottom:12px;border-bottom:1px solid #ffffff24}
+.brand-logo{display:block;width:124px;height:auto;max-width:100%;mix-blend-mode:normal}
+.brand-subtitle{display:block;margin-top:-2px;color:#d5ccd9;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.close-menu{display:none;position:absolute;top:0;right:0;width:36px;height:36px;border:0;border-radius:8px;background:#ffffff18;color:white;font-size:24px;line-height:1}
+.sidebar nav{display:block}
+.nav-group{display:grid;gap:3px;margin-bottom:17px}
+.nav-label{padding:0 13px 7px;color:#b9a8c0;font-size:10px;font-weight:800;letter-spacing:.13em;text-transform:uppercase}
+.sidebar nav button{width:100%;min-height:42px;padding:10px 13px;color:#ded5e2;font-size:13px;border-radius:10px}
+.sidebar nav button:hover{background:#ffffff17;color:#fff}
+.sidebar nav button.active{background:var(--brand-blue);box-shadow:none;color:white}
+.sidebar-note{margin:auto 12px 0;padding-top:15px;border-top:1px solid #ffffff24;color:#c7b9ce}
+.topbar{min-height:92px;padding:20px 34px;background:var(--surface);border-color:var(--line)}
+.topbar-title{min-width:0}
+.topbar h1{font-size:25px;color:#292637}
+.eyebrow{color:var(--brand-blue)}
+main{max-width:1500px;padding:28px 34px 64px}
+.hero{position:relative;align-items:center;min-height:156px;padding:25px 30px;margin-bottom:18px;border-radius:16px;background:radial-gradient(circle at 88% 10%,#116c8c65,transparent 35%),var(--brand-plum)}
+.hero .eyebrow{color:#a7e7f4}
+.hero h2{margin:7px 0;font-size:clamp(25px,2.7vw,34px);line-height:1.15}
+.hero p{color:#e1d8e4;line-height:1.5}
+.hero-actions{display:flex;flex-direction:column;align-items:flex-end;gap:9px;flex:none}
+.hero-actions span{color:#ded3e3;font-size:11px;font-weight:650}
+.primary,.hero .primary{min-height:42px;background:var(--brand-blue);color:white}
+.primary:hover,.hero .primary:hover{background:var(--brand-blue-dark)}
+.hero .primary{background:#d7f4f8;color:#174458}
+.hero .primary:hover{background:#bce9f1}
+.secondary,.file-button{background:#e8f1f5;color:#18536b}
+.secondary:hover,.file-button:hover{background:#d6e8ef}
+.dashboard-stats{gap:13px}
+.stats .stat-card{position:relative;min-width:0;padding:19px 19px 16px;border:1px solid var(--line);border-radius:13px;box-shadow:0 3px 14px #31233808;overflow:hidden}
+.stat-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--brand-blue)}
+.stat-card.stat-orders::before{background:#73547d}
+.stat-card.stat-stock::before{background:#c57655}
+.stat-card span{color:#606c7b;font-weight:700}
+.stat-card strong{margin:10px 0 4px;color:#252a37;font-size:clamp(22px,2.5vw,29px);overflow-wrap:anywhere}
+.stat-card small{line-height:1.4}
+.panel{border-color:var(--line);box-shadow:0 3px 14px #31233808}
+.panel-head{gap:14px}
+.panel h2{color:#292637}
+.pending-group{border-color:var(--line);background:#fbfcfd}
+.pending-group h3{color:#30293b}
+.badge{background:#e5f1f6;color:var(--brand-blue-dark)}
+th{color:#667483;background:#f7f9fb;border-color:var(--line)}
+tbody tr:hover{background:#f9fbfc}
+.table-wrap{border:1px solid var(--line);border-radius:9px;-webkit-overflow-scrolling:touch}
+.text-button{color:var(--brand-blue)}
+.form-grid input:focus,.form-grid select:focus,.form-grid textarea:focus,.catalog-search input:focus{border-color:var(--brand-blue);box-shadow:0 0 0 3px #116c8c22}
+button:focus-visible{outline:3px solid #7acbde;outline-offset:2px}
+#selected-order:focus-visible{outline-color:var(--brand-blue)}
+@media(max-width:1100px){.hero{gap:20px}}
+@media(max-width:700px){.sidebar{width:min(280px,86vw);padding:18px 14px}.close-menu{display:block}.topbar{min-height:76px;padding:15px 17px}.topbar h1{font-size:21px}.menu{color:var(--brand-plum)}main{padding:18px 15px 48px}.hero{min-height:0;padding:22px;gap:19px;align-items:stretch}.hero-actions{align-items:flex-start;width:100%}.hero-actions .primary{width:100%}.dashboard-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.stats .stat-card{padding:16px}.panel{padding:17px}.table-wrap{margin:0 -4px}th,td{padding:11px 9px}}
+@media(max-width:470px){.dashboard-stats{grid-template-columns:1fr}.hero h2{font-size:26px}.topbar .eyebrow{font-size:9px}.sync-status{max-width:125px;font-size:10px}.topbar-actions{gap:4px}}

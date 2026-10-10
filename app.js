@@ -76,6 +76,7 @@ function dashboard() {
   const pending = state.orders.filter(item => !["delivered", "cancelled"].includes(item.status));
   const low = state.products.filter(item => Number(item.stock) <= Number(item.minStock || 0));
   const attention = dailyPending(state, date());
+  const attentionCount = attention.today.length + attention.overdue.length + attention.unpaid.length + attention.stocked.length;
   const groups = [
     ["Entregas de hoy", attention.today, "No hay entregas previstas para hoy."],
     ["Entregas atrasadas", attention.overdue, "No hay entregas atrasadas."],
@@ -83,8 +84,8 @@ function dashboard() {
     ["Encargos con stock disponible", attention.stocked, "No hay encargos con stock suficiente."]
   ];
   const pendingPanels = groups.map(([title, orders, message]) => `<article class="pending-group"><h3>${title} <span class="badge">${orders.length}</span></h3>${orders.length ? rows(["Cliente / productos", "Entrega", "Saldo", ""], orders.map(item => `<tr><td><strong>${esc(item.customerName)}</strong><small>${item.lines.map(line => `${esc(productName(line.productId))} × ${esc(line.quantity)}`).join("<br>")}</small></td><td>${esc(item.deliveryDate || "Sin fecha")}<small>${item.deliveryMethod === "dac" ? "DAC" : "Montevideo"}</small></td><td>${money(orderTotal(item) - paidAmount(state, item.id))}</td><td><button class="text-button" data-open-order="${esc(item.id)}" aria-label="Ver pedido de ${esc(item.customerName)}">Ver pedido</button></td></tr>`).join("")) : empty(message)}</article>`).join("");
-  return `<div class="hero"><div><span class="eyebrow">TU NEGOCIO EN UN VISTAZO</span><h2>Vendé con claridad.<br><em>Gestioná con control.</em></h2><p>Stock, pedidos de redes sociales y resultados, en un mismo lugar.</p></div><button class="primary" data-view="orders">Nuevo pedido →</button></div>
-    <div class="stats"><article><span>Ventas del mes</span><strong>${money(summary.revenue)}</strong><small>${summary.sales} operaciones</small></article><article><span>Margen de productos</span><strong>${money(summary.revenue - summary.shipping - summary.cost)}</strong><small>Ventas sin envíos menos costo de mercadería</small></article><article><span>Pedidos activos</span><strong>${pending.length}</strong><small>Por atender o entregar</small></article><article><span>Productos con stock bajo</span><strong>${low.length}</strong><small>Según mínimo configurado</small></article></div>
+  return `<div class="hero"><div class="hero-copy"><span class="eyebrow">PANEL DE CUALITEC</span><h2>Tu negocio, al día.</h2><p>Pedidos, stock y resultados de tus ventas por redes, en un solo lugar.</p></div><div class="hero-actions"><button class="primary" data-view="orders">+ Nuevo pedido</button><span>${attentionCount} ${attentionCount === 1 ? "aviso" : "avisos"} para revisar</span></div></div>
+    <div class="stats dashboard-stats"><article class="stat-card stat-sales"><span>Ventas del mes</span><strong>${money(summary.revenue)}</strong><small>${summary.sales} operaciones</small></article><article class="stat-card stat-margin"><span>Margen de productos</span><strong>${money(summary.revenue - summary.shipping - summary.cost)}</strong><small>Ventas menos costo de mercadería y envíos</small></article><article class="stat-card stat-orders"><span>Pedidos activos</span><strong>${pending.length}</strong><small>Por atender o entregar</small></article><article class="stat-card stat-stock"><span>Stock bajo</span><strong>${low.length}</strong><small>Productos para reponer</small></article></div>
     ${section("Pendientes de hoy", `<p class="form-hint">Entregas, cobros y encargos que necesitan atención. Un pedido puede aparecer en más de un grupo. El stock de cada encargo se comprueba por separado y todavía no queda reservado.</p><div class="grid two">${pendingPanels}</div>`)}
     <div class="grid two">${section("Pedidos en curso", pending.length ? rows(["Cliente", "Productos", "Estado", "Entrega"], pending.slice(-5).reverse().map(item => `<tr><td>${esc(item.customerName)}</td><td>${item.lines.map(line => `${esc(productName(line.productId))} × ${line.quantity}`).join("<br>")}</td><td>${badge(orderStatuses[item.status])}</td><td>${esc(item.deliveryDate || "Sin fecha")}</td></tr>`).join("")) : empty("Todavía no hay pedidos activos."))}
     ${section("Reponer pronto", low.length ? rows(["Producto", "En stock", "Disponible"], low.map(item => `<tr><td>${esc(item.name)}</td><td>${item.stock}</td><td>${availableQuantity(state, item.id)}</td></tr>`).join("")) : empty("El inventario está por encima de los mínimos."))}</div>`;
@@ -272,7 +273,11 @@ function render() {
   const titles = { dashboard: "Resumen", products: "Productos", purchases: "Compras", orders: "Pedidos", customers: "Clientes", sales: "Ventas", aftersales: "Garantías y posventa", data: "Datos y respaldo" };
   document.querySelector("#view-title").textContent = titles[view];
   document.querySelector("#today").textContent = new Intl.DateTimeFormat("es-UY", { day: "numeric", month: "long", year: "numeric" }).format(new Date());
-  document.querySelectorAll("[data-view]").forEach(button => button.classList.toggle("active", button.dataset.view === view));
+  document.querySelectorAll("[data-view]").forEach(button => {
+    const active = button.dataset.view === view;
+    button.classList.toggle("active", active);
+    if (button.closest(".sidebar")) { if (active) button.setAttribute("aria-current", "page"); else button.removeAttribute("aria-current"); }
+  });
   app.innerHTML = ({ dashboard, products, purchases, orders, customers, sales, aftersales, data: dataView })[view]();
   if (view === "orders" && selectedOrderId) {
     app.insertAdjacentHTML("afterbegin", selectedOrderDetails() + messageComposer());
@@ -308,8 +313,8 @@ function addOrderProductByCode() {
 document.addEventListener("click", event => {
   const target = event.target.closest("button"); if (!target) return;
   if (target.id === "sync-status") { view = "data"; render(); if (syncStatus === "remote_available") refreshCloud(); }
-  if (target.dataset.view) { view = target.dataset.view; render(); document.querySelector(".sidebar").classList.remove("open"); if (syncStatus === "remote_available") refreshCloud(); }
-  if (target.id === "menu") document.querySelector(".sidebar").classList.toggle("open");
+  if (target.dataset.view) { view = target.dataset.view; render(); document.querySelector(".sidebar").classList.remove("open"); document.querySelector("#menu").setAttribute("aria-expanded", "false"); if (syncStatus === "remote_available") refreshCloud(); }
+  if (target.id === "menu" || target.id === "close-menu") { const open = target.id === "menu" ? document.querySelector(".sidebar").classList.toggle("open") : (document.querySelector(".sidebar").classList.remove("open"), false); document.querySelector("#menu").setAttribute("aria-expanded", String(open)); }
   if (target.dataset.startCase || target.dataset.editCase || target.id === "clear-service-case") {
     selectedCaseId = target.dataset.editCase || null;
     caseSaleId = target.dataset.startCase || null;

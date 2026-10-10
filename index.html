@@ -3,34 +3,30 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#101b30" />
+  <meta name="theme-color" content="#3a2b43" />
   <meta name="description" content="Gestión interna de ventas, stock y pedidos de Cualitec" />
   <title>Cualitec · Gestión</title>
-  <link rel="stylesheet" href="styles.css?v=sync-20261003" />
+  <link rel="icon" type="image/png" href="assets/cualitec-color.png" />
+  <link rel="stylesheet" href="styles.css?v=design-20261010" />
 </head>
 <body>
   <div class="shell">
     <aside class="sidebar">
-      <div class="brand"><span class="brand-icon">C</span><div><strong>Cualitec</strong><small>Panel de gestión</small></div></div>
+      <div class="brand"><img class="brand-logo" src="assets/cualitec-color.png" alt="Cualitec" /><span class="brand-subtitle">Panel de gestión</span><button id="close-menu" class="close-menu" type="button" aria-label="Cerrar menú">×</button></div>
       <nav aria-label="Navegación principal">
-        <button data-view="dashboard" class="active">Resumen</button>
-        <button data-view="products">Productos</button>
-        <button data-view="purchases">Compras</button>
-        <button data-view="orders">Pedidos</button>
-        <button data-view="customers">Clientes</button>
-        <button data-view="sales">Ventas</button>
-        <button data-view="aftersales">Garantías y posventa</button>
-        <button data-view="data">Datos y respaldo</button>
+        <div class="nav-group"><span class="nav-label">Inicio</span><button data-view="dashboard" class="active">Resumen</button></div>
+        <div class="nav-group"><span class="nav-label">Operación</span><button data-view="orders">Pedidos</button><button data-view="products">Productos</button><button data-view="purchases">Compras</button><button data-view="customers">Clientes</button></div>
+        <div class="nav-group"><span class="nav-label">Control</span><button data-view="sales">Ventas</button><button data-view="aftersales">Garantías y posventa</button><button data-view="data">Datos y respaldo</button></div>
       </nav>
       <p class="sidebar-note">Gestión de ventas por redes sociales</p>
     </aside>
     <div class="main-wrap">
-      <header class="topbar"><button id="menu" class="menu" aria-label="Abrir menú">☰</button><div><span class="eyebrow">CUALITEC / GESTIÓN</span><h1 id="view-title">Resumen</h1></div><div class="topbar-actions"><span id="today"></span><button id="sync-status" class="sync-status checking" type="button" title="Ver sincronización">Consultando nube</button></div></header>
+      <header class="topbar"><button id="menu" class="menu" type="button" aria-label="Abrir menú" aria-expanded="false">☰</button><div class="topbar-title"><span class="eyebrow">CUALITEC / GESTIÓN</span><h1 id="view-title">Resumen</h1></div><div class="topbar-actions"><span id="today"></span><button id="sync-status" class="sync-status checking" type="button" title="Ver sincronización">Consultando nube</button></div></header>
       <main id="app"></main>
     </div>
   </div>
   <div id="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="app.js?v=sync-20261003"></script>
+  <script type="module" src="app.js?v=design-20261010"></script>
 </body>
 </html>
 
