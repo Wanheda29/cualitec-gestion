@@ -143,3 +143,10 @@ td small{line-height:1.5}
 .quick-sale-total span{display:flex;flex-direction:column;gap:3px;min-width:190px;color:#526477;font-size:12px}
 .quick-sale-total strong{color:#21384b;font-size:19px;font-variant-numeric:tabular-nums}
 @media(max-width:700px){.quick-sale-total{flex-direction:column}.hero-link{align-self:flex-start}}
+
+/* Importación del catálogo */
+.catalog-preview{margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}
+.catalog-preview h3{margin:0;color:#292637;font-size:15px}
+.catalog-preview>.form-hint{margin:6px 0 15px}
+.catalog-preview .form-actions{margin-top:16px}
+.import-error{margin:17px 0 0;padding:12px 14px;border:1px solid #efc6bc;border-radius:9px;background:#fff2ef;color:#923d31;font-size:13px}

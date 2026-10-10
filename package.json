@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "serve": "node server.js",
-    "test": "node --test test/domain.test.js test/messages.test.js test/aftersales.test.js test/sync.test.js"
+    "test": "node --test test/*.test.js"
   }
 }
 

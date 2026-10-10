@@ -4,6 +4,7 @@ import { salesReportCsv, paymentReportCsv, salesVisualSummary } from "./reports.
 import { messageTypes, orderMessage, whatsappPhone, whatsappUrl } from "./messages.js?v=aftersales-20261002";
 import { caseTypes, caseStatuses, warrantyInfo, saveServiceCase } from "./aftersales.js?v=aftersales-20261002";
 import { canonical, fingerprint, syncDecision } from "./sync.js?v=sync-20261003";
+import { catalogCsvTemplate, parseCatalogCsv, validateCatalogRows, importCatalogRows } from "./catalog-import.js?v=catalog-import-20261010";
 
 const KEY = "cualitec-gestion-v1";
 const SYNC_KEY = "cualitec-sync-v1";
@@ -22,6 +23,7 @@ let syncStatus = "checking", draftDirty = false, refreshPromise = null, pendingW
 let salesFilters = { from: "", to: "", channel: "" };
 let paymentFilters = { from: "", to: "", method: "" };
 let stockFilters = { from: "", to: "", productId: "" };
+let catalogPreview = null;
 let historySnapshots = [], historyStatus = "", historyAvailable = false;
 let saveQueue = Promise.resolve();
 const app = document.querySelector("#app");
@@ -117,7 +119,16 @@ function products() {
     const status = stock <= 0 ? badge("Sin stock", "stock-empty") : restock ? badge("Reponer", "stock-low") : available <= 0 ? badge("Todo reservado", "stock-reserved") : badge("Disponible", "stock-available");
     return `<tr data-product-row data-restock="${restock}" data-unavailable="${available <= 0}" data-search="${esc([item.name, item.category, item.variant, item.barcode, item.sku].join(" ").toLowerCase())}"><td><strong>${esc(item.name)}</strong><small>${esc([item.category, item.variant].filter(Boolean).join(" · "))}</small></td><td>${esc(item.barcode || item.sku || "—")}</td><td>${stock}</td><td>${available}</td><td>${status}</td><td>${money(item.averageCost)}</td><td>${money(item.price)}</td><td><div class="row-actions"><button class="text-button" data-edit-product="${esc(item.id)}">Editar</button><button class="text-button" data-restock-product="${esc(item.id)}">Registrar entrada</button></div></td></tr>`;
   }).join("")) : empty("Agregá el primer producto de Cualitec.");
-  return `${summary}${section("Catálogo", `<p class="form-hint inventory-note">Disponible = stock físico menos unidades reservadas. «Reponer» se basa en el stock mínimo de cada variante.</p><label class="catalog-search">Buscar por nombre, código de barras o SKU<input id="product-search" autocomplete="off" placeholder="Escribí o escaneá un código"></label><div class="inventory-filters" role="group" aria-label="Filtrar productos"><button type="button" class="inventory-filter active" data-inventory-filter="all" aria-pressed="true">Todos</button><button type="button" class="inventory-filter" data-inventory-filter="restock" aria-pressed="false">Para reponer</button><button type="button" class="inventory-filter" data-inventory-filter="unavailable" aria-pressed="false">Sin disponibilidad</button></div><p id="product-search-empty" class="empty" hidden>No hay productos para esa búsqueda o filtro.</p>${table}`, '<button id="new-product" class="secondary" type="button">+ Agregar producto</button>')}${section("Agregar o editar producto", form)}`;
+  const importer = `<p class="form-hint">Descargá la plantilla CSV, completá una fila por variante y elegí el archivo para revisar los datos. Se agregan productos nuevos; no se reemplazan los existentes. Si cargás stock inicial, indicá su costo unitario: quedará registrado como entrada de mercadería.</p><div class="form-actions"><button id="catalog-template" class="secondary" type="button">Descargar plantilla CSV</button><label class="file-button">Elegir CSV<input id="catalog-csv" type="file" accept=".csv,text/csv" hidden></label></div><div id="catalog-import-preview">${catalogPreviewMarkup()}</div>`;
+  return `${summary}${section("Catálogo", `<p class="form-hint inventory-note">Disponible = stock físico menos unidades reservadas. «Reponer» se basa en el stock mínimo de cada variante.</p><label class="catalog-search">Buscar por nombre, código de barras o SKU<input id="product-search" autocomplete="off" placeholder="Escribí o escaneá un código"></label><div class="inventory-filters" role="group" aria-label="Filtrar productos"><button type="button" class="inventory-filter active" data-inventory-filter="all" aria-pressed="true">Todos</button><button type="button" class="inventory-filter" data-inventory-filter="restock" aria-pressed="false">Para reponer</button><button type="button" class="inventory-filter" data-inventory-filter="unavailable" aria-pressed="false">Sin disponibilidad</button></div><p id="product-search-empty" class="empty" hidden>No hay productos para esa búsqueda o filtro.</p>${table}`, '<button id="new-product" class="secondary" type="button">+ Agregar producto</button>')}${section("Agregar o editar producto", form)}${section("Importar catálogo desde CSV", importer)}`;
+}
+
+function catalogPreviewMarkup() {
+  if (!catalogPreview) return "";
+  const { name, rows: items } = catalogPreview;
+  const units = items.reduce((sum, item) => sum + item.stock, 0);
+  const preview = rows(["Producto / variante", "Código / SKU", "Precio", "Stock inicial", "Costo unitario"], items.slice(0, 30).map(item => `<tr><td><strong>${esc(item.name)}</strong><small>${esc([item.category, item.variant].filter(Boolean).join(" · "))}</small></td><td>${esc(item.barcode || item.sku || "—")}</td><td>${money(item.price)}</td><td>${item.stock}</td><td>${money(item.unitCost)}</td></tr>`).join(""));
+  return `<div class="catalog-preview"><h3>Vista previa · ${items.length} ${items.length === 1 ? "variante" : "variantes"}</h3><p class="form-hint">${esc(name)} · ${units} unidades iniciales${items.length > 30 ? " · se muestran las primeras 30 filas" : ""}</p>${preview}<div class="form-actions"><button id="confirm-catalog-import" class="primary" type="button">Importar ${items.length} ${items.length === 1 ? "variante" : "variantes"}</button><button id="cancel-catalog-import" class="secondary" type="button">Cancelar</button></div></div>`;
 }
 
 function filterProducts() {
@@ -366,6 +377,21 @@ function addProductByCode(quick = false) {
 
 document.addEventListener("click", event => {
   const target = event.target.closest("button"); if (!target) return;
+  if (target.id === "catalog-template") {
+    const blob = new Blob(["\ufeff", catalogCsvTemplate], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob), link = document.createElement("a");
+    link.href = url; link.download = "cualitec-plantilla-productos.csv"; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  if (target.id === "cancel-catalog-import") { catalogPreview = null; document.querySelector("#catalog-import-preview").innerHTML = ""; }
+  if (target.id === "confirm-catalog-import") {
+    try {
+      if (!catalogPreview) throw new Error("Elegí un CSV para importar.");
+      const count = catalogPreview.rows.length;
+      const next = importCatalogRows(state, catalogPreview.rows, date());
+      catalogPreview = null; persist(next);
+      toast(`${count} ${count === 1 ? "variante importada" : "variantes importadas"}.`);
+    } catch (error) { toast(error.message); }
+  }
   if (target.dataset.inventoryFilter) {
     document.querySelectorAll("[data-inventory-filter]").forEach(button => {
       const active = button === target;
@@ -603,6 +629,23 @@ document.addEventListener("change", async event => {
   if (event.target.closest(".order-line")) event.target.closest(".order-line").removeAttribute("data-pristine");
   if (["discountType", "shippingPayer"].includes(event.target.name) && event.target.closest("#order-form,#quick-sale-form")) syncOrderControls(event.target.form, true);
   if (event.target.closest("#quick-sale-form")) syncQuickSaleTotal();
+  if (event.target.id === "catalog-csv") {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      if (file.size > 1024 * 1024) throw new Error("El CSV debe ocupar menos de 1 MB.");
+      const parsed = parseCatalogCsv(await file.text());
+      validateCatalogRows(state, parsed);
+      catalogPreview = { name: file.name, rows: parsed };
+      const preview = document.querySelector("#catalog-import-preview");
+      if (preview) preview.innerHTML = catalogPreviewMarkup();
+    } catch (error) {
+      catalogPreview = null;
+      const preview = document.querySelector("#catalog-import-preview");
+      if (preview) preview.innerHTML = `<p class="import-error" role="alert">${esc(error.message)}</p>`;
+    }
+    event.target.value = "";
+  }
   if (event.target.id === "import") {
     try {
       const input = JSON.parse(await event.target.files[0].text());
