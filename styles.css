@@ -103,3 +103,17 @@ td small{line-height:1.5}
 #order-form>.form-hint.wide{padding:12px 14px;margin:2px 0;border-radius:9px;background:#f1f7fa}
 #selected-order h3{margin:0 0 4px;color:#292637}
 @media(max-width:700px){.table-scroll-hint{display:block;margin:0 0 8px!important;color:#607387;font-size:11px!important}.form-grid{row-gap:15px}.order-line{grid-template-columns:repeat(2,minmax(0,1fr))}.order-line label:first-child,.order-line .remove-line{grid-column:1/-1}.order-line .remove-line{text-align:left}.panel-head .secondary{width:100%}}
+
+/* Gráficos del informe de ventas */
+.sales-charts{margin-bottom:20px;align-items:stretch}
+.sales-charts .panel{min-width:0}
+.sales-charts .form-hint{margin:0;color:#627184}
+.report-bars{display:grid;gap:17px;margin:19px 0 0;padding:0;list-style:none}
+.report-bars li{min-width:0}
+.report-bar-info{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:7px;color:#283445;font-size:13px}
+.report-bar-info strong{min-width:0;overflow-wrap:anywhere}
+.report-bar-info span{flex:none;font-weight:750;font-variant-numeric:tabular-nums}
+.report-bar-track{height:11px;border-radius:999px;background:#e9eff3;overflow:hidden}
+.report-bar-track span{display:block;height:100%;border-radius:inherit;background:var(--brand-blue)}
+.report-bars.channels .report-bar-track span{background:#73547d}
+.report-bars small{display:block;margin-top:5px;color:#6a798a;font-size:11px}

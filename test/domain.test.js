@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { emptyState, normalizeState, findProductByCode, addPurchase, adjustStock, saveOrder, availableQuantity, deliverOrder, orderTotal, monthlySummary, paidAmount, recordPayment, stockMovements, paymentMovements } from "../domain.js";
-import { salesReportCsv, paymentReportCsv } from "../reports.js";
+import { salesReportCsv, paymentReportCsv, salesVisualSummary } from "../reports.js";
 import { dailyPending } from "../domain.js";
 
 const product = { id: "p1", name: "Auriculares", stock: 0, averageCost: 0, price: 1000 };
@@ -160,5 +160,20 @@ test("el informe de cobros separa fechas, devoluciones y señas antiguas", () =>
   assert.match(csv, /"'=Ana"/);
   assert.match(csv, /"-50,00"/);
   assert.match(csv, /"Sin medio registrado"/);
+});
+
+test("los gráficos usan solo las ventas filtradas y suman por mes y canal", () => {
+  const sales = [
+    { date: "2026-08-04", channel: "Instagram", total: 100 },
+    { date: "2026-09-12", channel: "WhatsApp", total: 200 },
+    { date: "2026-09-18", channel: "Instagram", total: 50 },
+    { date: "2026-10-01", channel: "Instagram", total: 300 }
+  ];
+  const selected = sales.filter(sale => sale.date >= "2026-09-01" && sale.date <= "2026-09-30");
+  const summary = salesVisualSummary(selected);
+  assert.deepEqual(summary.months, [{ key: "2026-09", total: 250, count: 2 }]);
+  assert.deepEqual(summary.channels, [{ key: "WhatsApp", total: 200, count: 1 }, { key: "Instagram", total: 50, count: 1 }]);
+  assert.equal(salesVisualSummary([]).months.length, 0);
+  assert.deepEqual(salesVisualSummary(Array.from({ length: 7 }, (_, index) => ({ date: `2026-${String(index + 1).padStart(2, "0")}-01`, channel: "Instagram", total: 10 }))).months.map(item => item.key), ["2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07"]);
 });
 

@@ -1,6 +1,6 @@
 import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, findProductByCode, addPurchase, adjustStock, saveOrder, deliverOrder, orderTotal, paidAmount, recordPayment, monthlySummary, stockMovements, paymentMovements, dailyPending } from "./domain.js?v=aftersales-20261002";
 import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readCloud, writeCloud, listCloudHistory, readCloudRevision } from "./cloud.js?v=aftersales-20261002";
-import { salesReportCsv, paymentReportCsv } from "./reports.js?v=aftersales-20261002";
+import { salesReportCsv, paymentReportCsv, salesVisualSummary } from "./reports.js?v=charts-20261010";
 import { messageTypes, orderMessage, whatsappPhone, whatsappUrl } from "./messages.js?v=aftersales-20261002";
 import { caseTypes, caseStatuses, warrantyInfo, saveServiceCase } from "./aftersales.js?v=aftersales-20261002";
 import { canonical, fingerprint, syncDecision } from "./sync.js?v=sync-20261003";
@@ -26,6 +26,7 @@ let historySnapshots = [], historyStatus = "", historyAvailable = false;
 let saveQueue = Promise.resolve();
 const app = document.querySelector("#app");
 const money = value => new Intl.NumberFormat("es-UY", { style: "currency", currency: "UYU", maximumFractionDigits: 2 }).format(Number(value || 0));
+const monthLabel = month => new Intl.DateTimeFormat("es-UY", { month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${month}-01T00:00:00Z`));
 const date = () => { const now = new Date(); return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`; };
 const id = prefix => `${prefix}_${crypto.randomUUID()}`;
 const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -70,6 +71,14 @@ const section = (title, body, action = "") => `<section class="panel"><div class
 const empty = label => `<p class="empty">${label}</p>`;
 const badge = (label, tone = "") => `<span class="badge${/^[a-z-]+$/.test(tone) ? ` badge--${tone}` : ""}">${esc(label)}</span>`;
 const rows = (headers, body) => `<div class="table-region">${headers.length >= 5 ? '<p class="table-scroll-hint">Deslizá la tabla para ver todas las columnas →</p>' : ""}<div class="table-wrap ${headers.length >= 9 ? "table-huge" : headers.length >= 7 ? "table-extra-wide" : headers.length >= 5 ? "table-wide" : ""}"><table><thead><tr>${headers.map(x => `<th>${x}</th>`).join("")}</tr></thead><tbody>${body}</tbody></table></div></div>`;
+const reportBars = (items, kind) => {
+  if (!items.length) return empty("No hay ventas para mostrar con estos filtros.");
+  const scale = kind === "months" ? Math.max(1, ...items.map(item => item.total)) : Math.max(1, items.reduce((sum, item) => sum + item.total, 0));
+  return `<ol class="report-bars ${kind}">${items.map(item => {
+    const width = Math.max(0, Math.min(100, Math.round(item.total / scale * 100)));
+    return `<li><div class="report-bar-info"><strong>${esc(kind === "months" ? monthLabel(item.key) : item.key)}</strong><span>${money(item.total)}</span></div><div class="report-bar-track" aria-hidden="true"><span style="width:${width}%"></span></div><small>${item.count} ${item.count === 1 ? "venta" : "ventas"}</small></li>`;
+  }).join("")}</ol>`;
+};
 
 function dashboard() {
   const month = date().slice(0, 7), summary = monthlySummary(state, month);
@@ -192,8 +201,10 @@ function sales() {
   const refunded = -payments.filter(item => item.kind === "refund").reduce((sum, item) => sum + item.amount, 0);
   const paymentFilterForm = `<form id="payment-filter-form" class="form-grid"><label>Desde<input name="from" type="date" value="${esc(paymentFilters.from)}"></label><label>Hasta<input name="to" type="date" value="${esc(paymentFilters.to)}"></label><label>Medio de pago<select name="method">${option("", "Todos los medios", !paymentFilters.method)}${Object.entries(paymentMethods).map(([key, value]) => option(key, value, key === paymentFilters.method)).join("")}${paymentMovements(state).some(item => item.method === "legacy") ? option("legacy", "Sin medio registrado", paymentFilters.method === "legacy") : ""}</select></label><div class="form-actions"><button class="primary">Aplicar filtros</button><button id="clear-payment-filters" type="button" class="secondary">Limpiar</button><button id="export-payments" type="button" class="secondary" ${payments.length ? "" : "disabled"}>Descargar CSV</button></div></form>`;
   const paymentTable = payments.length ? rows(["Fecha", "Movimiento", "Cliente", "Comprobante", "Medio", "Importe neto", "Nota"], payments.map(item => `<tr><td>${esc(item.date || "Sin fecha")}</td><td>${item.kind === "refund" ? "Devolución" : "Cobro"}</td><td>${esc(item.customerName)}</td><td>${esc(item.receiptNumber || "—")}</td><td>${esc(item.method === "legacy" ? "Sin medio registrado" : paymentMethods[item.method] || item.method)}</td><td class="${item.amount < 0 ? "stock-out" : "stock-in"}">${item.amount < 0 ? "−" : "+"}${money(Math.abs(item.amount))}</td><td>${esc(item.note || "—")}</td></tr>`).join("")) : empty("No hay cobros ni devoluciones para los filtros elegidos.");
+  const visuals = salesVisualSummary(filtered);
+  const charts = filtered.length ? `<div class="grid two sales-charts">${section("Evolución mensual", `<p class="form-hint">Últimos seis meses con ventas dentro de los filtros elegidos.</p>${reportBars(visuals.months, "months")}`)}${section("Ventas por canal", `<p class="form-hint">Participación de cada canal en el importe vendido del período.</p>${reportBars(visuals.channels, "channels")}`)}</div>` : "";
   const paymentReport = `${paymentFilterForm}<p class="form-hint">Este informe usa la fecha del cobro o devolución; puede diferir de la fecha de venta. Las señas antiguas sin fecha quedan fuera al filtrar por período.</p><div class="stats payment-stats"><article><span>Cobrado</span><strong>${money(charged)}</strong></article><article><span>Devuelto</span><strong>${money(refunded)}</strong></article><article><span>Ingreso neto</span><strong>${money(charged - refunded)}</strong></article></div>${paymentTable}`;
-  return `${section("Filtrar ventas", filterForm)}<div class="stats"><article><span>Ventas</span><strong>${filtered.length}</strong><small>Total ${money(totals.revenue)}</small></article><article><span>Margen de productos</span><strong>${money(totals.revenue - totals.shipping - totals.cost)}</strong><small>Sin cargo de envío ni costo de mercadería</small></article><article><span>Descuentos</span><strong>${money(totals.discount)}</strong><small>Aplicados manualmente</small></article><article><span>Por cobrar</span><strong>${money(totals.outstanding)}</strong><small>De las ventas filtradas</small></article></div>${section("Ventas realizadas", table)}${section("Productos vendidos", productTable)}${section("Cobros y devoluciones por fecha", paymentReport)}`;
+  return `${section("Filtrar ventas", filterForm)}<div class="stats"><article><span>Ventas</span><strong>${filtered.length}</strong><small>Total ${money(totals.revenue)}</small></article><article><span>Margen de productos</span><strong>${money(totals.revenue - totals.shipping - totals.cost)}</strong><small>Sin cargo de envío ni costo de mercadería</small></article><article><span>Descuentos</span><strong>${money(totals.discount)}</strong><small>Aplicados manualmente</small></article><article><span>Por cobrar</span><strong>${money(totals.outstanding)}</strong><small>De las ventas filtradas</small></article></div>${charts}${section("Ventas realizadas", table)}${section("Productos vendidos", productTable)}${section("Cobros y devoluciones por fecha", paymentReport)}`;
 }
 
 function dataView() {

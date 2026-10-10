@@ -25,3 +25,23 @@ export function paymentReportCsv(movements) {
   const rows = movements.map(item => [item.date, item.kind === "refund" ? "Devolución" : "Cobro", item.receiptNumber, item.customerName, item.channel, item.method === "legacy" ? "Sin medio registrado" : paymentMethods[item.method] || item.method, number(item.amount), item.note]);
   return [headers, ...rows].map(row => row.map(cell).join(";")).join("\r\n") + "\r\n";
 }
+
+export function salesVisualSummary(sales) {
+  const months = new Map(), channels = new Map();
+  for (const sale of sales) {
+    const total = Number(sale.total || 0), month = String(sale.date || "").slice(0, 7);
+    const channel = String(sale.channel || "Sin canal");
+    if (/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      const entry = months.get(month) || { key: month, total: 0, count: 0 };
+      entry.total += total; entry.count++;
+      months.set(month, entry);
+    }
+    const entry = channels.get(channel) || { key: channel, total: 0, count: 0 };
+    entry.total += total; entry.count++;
+    channels.set(channel, entry);
+  }
+  return {
+    months: [...months.values()].sort((a, b) => a.key.localeCompare(b.key)).slice(-6),
+    channels: [...channels.values()].sort((a, b) => b.total - a.total || a.key.localeCompare(b.key))
+  };
+}
