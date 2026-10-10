@@ -3,7 +3,7 @@ import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readClo
 import { salesReportCsv, paymentReportCsv, salesVisualSummary } from "./reports.js?v=charts-20261010";
 import { messageTypes, orderMessage, whatsappPhone, whatsappUrl } from "./messages.js?v=aftersales-20261002";
 import { caseTypes, caseStatuses, warrantyInfo, saveServiceCase } from "./aftersales.js?v=aftersales-20261002";
-import { canonical, fingerprint, syncDecision } from "./sync.js?v=sync-20261003";
+import { canonical, fingerprint, syncDecision, mergeIndependentChanges } from "./sync.js?v=merge-20261010";
 import { catalogCsvTemplate, parseCatalogCsv, validateCatalogRows, importCatalogRows } from "./catalog-import.js?v=catalog-import-20261010";
 
 const KEY = "cualitec-gestion-v1";
@@ -261,7 +261,7 @@ function dataView() {
   let account;
   if (!isCloudConfigured()) account = `<p>La nube de Cualitec todavía no está configurada. Los datos se guardan en este navegador.</p>`;
   else if (!session) account = `<p>Iniciá sesión para sincronizar datos entre dispositivos.</p><form id="login-form" class="form-grid"><label>Correo electrónico<input name="email" type="email" autocomplete="username" required></label><label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label><div class="form-actions"><button class="primary">Ingresar</button></div></form>`;
-  else account = `<p>Cuenta: <strong>${esc(session.user.email)}</strong></p><p>Estado: <strong id="sync-description">${syncLabels[syncStatus]}</strong></p>${cloudPending ? `<p>${syncStatus === "remote_available" ? "Hay datos nuevos en Supabase. Terminá o descartá el formulario sin guardar antes de cargarlos." : "Esta PC y Supabase tienen cambios distintos. Descargá un respaldo antes de elegir cuál conservar."}</p>` : syncStatus === "offline" ? `<p>Los cambios de esta PC siguen guardados aquí. Revisá la conexión para enviarlos a Supabase.</p>` : ""}<div class="form-actions"><button id="refresh-cloud" class="secondary">Revisar versión en Supabase</button>${cloudPending ? `<button id="load-cloud" class="secondary">Usar datos de Supabase</button>${syncStatus === "conflict" ? `<button id="keep-local" class="primary">Conservar datos de esta PC</button>` : ""}` : cloudEnabled ? `<button id="check-cloud" class="secondary">Probar sincronización</button>` : ""}<button id="logout" class="secondary">Cerrar sesión</button></div>${cloudCheck ? `<p>${esc(cloudCheck)}</p>` : ""}<form id="password-form" class="form-grid"><label>Nueva contraseña<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><label>Repetir contraseña<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label><div class="form-actions"><button class="secondary">Guardar contraseña</button></div></form>`;
+  else account = `<p>Cuenta: <strong>${esc(session.user.email)}</strong></p><p>Estado: <strong id="sync-description">${syncLabels[syncStatus]}</strong></p><p class="form-hint">Si las dos PC modifican registros distintos, se combinan cuando el resultado conserva stock, saldos y números de comprobante válidos. Los cambios que se contradicen siguen requiriendo una elección.</p>${cloudPending ? `<p>${syncStatus === "remote_available" ? "Hay datos nuevos en Supabase. Terminá o descartá el formulario sin guardar antes de cargarlos." : "Esta PC y Supabase tienen cambios distintos. Descargá un respaldo antes de elegir cuál conservar."}</p>` : syncStatus === "offline" ? `<p>Los cambios de esta PC siguen guardados aquí. Revisá la conexión para enviarlos a Supabase.</p>` : ""}<div class="form-actions"><button id="refresh-cloud" class="secondary">Revisar versión en Supabase</button>${cloudPending ? `<button id="load-cloud" class="secondary">Usar datos de Supabase</button>${syncStatus === "conflict" ? `<button id="keep-local" class="primary">Conservar datos de esta PC</button>` : ""}` : cloudEnabled ? `<button id="check-cloud" class="secondary">Probar sincronización</button>` : ""}<button id="logout" class="secondary">Cerrar sesión</button></div>${cloudCheck ? `<p>${esc(cloudCheck)}</p>` : ""}<form id="password-form" class="form-grid"><label>Nueva contraseña<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><label>Repetir contraseña<input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label><div class="form-actions"><button class="secondary">Guardar contraseña</button></div></form>`;
   const history = !session || !historyAvailable ? "" : section("Historial de recuperación", `<p>Las últimas 50 versiones sincronizadas se guardan en Supabase. Podés recuperar una anterior si cometés un error.</p><div class="form-actions"><button id="refresh-history" class="secondary">Actualizar historial</button></div>${historyStatus ? `<p>${esc(historyStatus)}</p>` : ""}${historySnapshots.length ? rows(["Versión", "Guardada", ""], historySnapshots.map(item => `<tr><td>${item.revision}</td><td>${esc(new Intl.DateTimeFormat("es-UY", { dateStyle: "short", timeStyle: "short" }).format(new Date(item.created_at)))}</td><td><button class="text-button" data-restore-revision="${item.revision}" ${item.revision === cloudRevision || !cloudEnabled ? "disabled" : ""}>Recuperar</button></td></tr>`).join("")) : empty("Todavía no hay versiones disponibles.")}`);
   return `<div class="grid two">${section("Respaldo", `<p>Descargá una copia de tus datos o restaurá un respaldo de Cualitec.</p><div class="form-actions"><button id="export" class="primary">Descargar respaldo</button><label class="file-button">Importar respaldo<input id="import" type="file" accept="application/json,.json" hidden></label></div>`)}${section("Cuenta y almacenamiento", account)}</div>${history}`;
 }
@@ -270,6 +270,43 @@ async function refreshHistory() {
   try { historySnapshots = await listCloudHistory(); historyStatus = ""; historyAvailable = true; }
   catch (error) { historySnapshots = []; historyStatus = `No se pudo cargar el historial: ${error.message}`; historyAvailable = false; }
   if (view === "data" && !draftDirty) render();
+}
+
+async function tryMergeCloud(localSnapshot, remoteState, remoteRevision, knownHash) {
+  if (draftDirty || !knownHash || !syncMeta?.revision) return false;
+  let base;
+  try { base = normalizeState(await readCloudRevision(syncMeta.revision)); }
+  catch { return false; } // Una versión antigua puede haber salido del historial de 50 copias.
+  if (await fingerprint(base) !== knownHash) return false;
+  if (canonical(state) !== canonical(localSnapshot)) { setTimeout(() => refreshCloud(), 0); return "retry"; }
+  const merged = mergeIndependentChanges(base, localSnapshot, remoteState);
+  if (!merged) return false;
+  const alreadyRemote = canonical(merged) === canonical(remoteState);
+  cloudEnabled = false; setSyncStatus("saving");
+  let revision = remoteRevision;
+  if (!alreadyRemote) {
+    try { revision = await writeCloud(merged, remoteRevision); }
+    catch (error) {
+      if (!error.message.includes("VERSION_CONFLICT")) throw error;
+      cloudEnabled = false; setSyncStatus("offline"); setTimeout(() => refreshCloud(), 0);
+      return "retry";
+    }
+  }
+  cloudRevision = revision;
+  if (canonical(state) !== canonical(localSnapshot)) {
+    cloudEnabled = false; setSyncStatus("offline"); setTimeout(() => refreshCloud(), 0);
+    return "retry";
+  }
+  state = merged; localStorage.setItem(KEY, JSON.stringify(state));
+  cloudPending = null;
+  await acknowledge(merged, revision);
+  if (canonical(state) !== canonical(merged)) {
+    setSyncStatus("offline"); setTimeout(() => refreshCloud(), 0);
+    return "retry";
+  }
+  cloudEnabled = true; setSyncStatus("synced"); render(); refreshHistory();
+  toast("Se combinaron cambios independientes de ambas PC.");
+  return "merged";
 }
 
 async function refreshCloud() {
@@ -311,11 +348,16 @@ async function refreshCloud() {
       } catch (error) {
         if (!error.message.includes("VERSION_CONFLICT")) throw error;
         const latest = await readCloud();
-        cloudRevision = Number(latest?.revision || 0); cloudPending = normalizeState(latest.data);
-        cloudEnabled = false; setSyncStatus("conflict"); if (!draftDirty) render();
+        cloudRevision = Number(latest?.revision || 0);
+        const latestState = normalizeState(latest.data);
+        const merge = await tryMergeCloud(localSnapshot, latestState, cloudRevision, knownHash);
+        if (merge === "merged" || merge === "retry") return;
+        cloudPending = latestState; cloudEnabled = false; setSyncStatus("conflict"); if (!draftDirty) render();
         toast("La otra PC guardó cambios mientras se sincronizaba. Elegí qué versión conservar.");
       }
     } else {
+      const merge = await tryMergeCloud(localSnapshot, remoteState, cloudRevision, knownHash);
+      if (merge === "merged" || merge === "retry") return;
       cloudPending = remoteState; cloudEnabled = false; setSyncStatus("conflict"); if (!draftDirty) render();
       toast("Hay cambios diferentes en esta PC y en Supabase. Elegí qué versión conservar.");
     }
