@@ -117,3 +117,18 @@ td small{line-height:1.5}
 .report-bar-track span{display:block;height:100%;border-radius:inherit;background:var(--brand-blue)}
 .report-bars.channels .report-bar-track span{background:#73547d}
 .report-bars small{display:block;margin-top:5px;color:#6a798a;font-size:11px}
+
+/* Resumen y filtros del inventario */
+.inventory-stats{margin-bottom:20px}
+.inventory-stats .stat-card{position:relative;min-width:0;padding:19px 19px 16px;border:1px solid var(--line);border-radius:13px;box-shadow:0 3px 14px #31233808;overflow:hidden}
+.inventory-note{margin:0 0 16px!important}
+.inventory-filters{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 16px}
+.inventory-filter{min-height:36px;padding:7px 13px;border:1px solid #d6e2e8;border-radius:999px;background:#fff;color:#475d6b;font-size:12px;font-weight:750}
+.inventory-filter:hover{background:#edf5f8}
+.inventory-filter.active{border-color:var(--brand-blue);background:#e5f1f6;color:var(--brand-blue-dark)}
+.badge--stock-empty{background:#fce9e6;color:#9b3838}
+.badge--stock-low{background:#fff2d9;color:#875610}
+.badge--stock-reserved{background:#f0e9f4;color:#70477a}
+.badge--stock-available{background:#e3f4ed;color:#176849}
+.inventory-stats .stat-card strong{font-variant-numeric:tabular-nums}
+@media(max-width:700px){.inventory-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.inventory-filter{flex:1 1 auto}}

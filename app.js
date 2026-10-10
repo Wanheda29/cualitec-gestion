@@ -102,8 +102,26 @@ function dashboard() {
 
 function products() {
   const form = `<form id="product-form" class="form-grid"><input name="id" type="hidden"><label>Producto o modelo<input name="name" required placeholder="Ej. Auriculares inalámbricos"></label><label>Categoría<input name="category" placeholder="Ej. Audio"></label><label>Variante (color, capacidad…)<input name="variant" placeholder="Ej. Negro · 128 GB"></label><label>Código de barras de esta variante<input name="barcode" inputmode="numeric" placeholder="Opcional"></label><label>SKU de esta variante<input name="sku" placeholder="Opcional"></label><label>Precio de venta<input name="price" type="number" min="0" step="0.01" required></label><label>Stock mínimo<input name="minStock" type="number" min="0" step="1" value="0" required></label><p class="form-hint wide">Creá un registro por cada color o capacidad. Cada variante tiene stock, precio y códigos propios.</p><div class="form-actions"><button class="primary">Guardar variante</button><button type="reset" class="secondary">Limpiar</button></div></form>`;
-  const table = state.products.length ? rows(["Producto", "Código de barras", "Stock", "Disponible", "Costo prom.", "Precio", ""], state.products.map(item => `<tr data-product-row data-search="${esc([item.name, item.category, item.variant, item.barcode, item.sku].join(" ").toLowerCase())}"><td><strong>${esc(item.name)}</strong><small>${esc([item.category, item.variant].filter(Boolean).join(" · "))}</small></td><td>${esc(item.barcode || item.sku || "—")}</td><td>${item.stock}</td><td>${availableQuantity(state, item.id)}</td><td>${money(item.averageCost)}</td><td>${money(item.price)}</td><td><button class="text-button" data-edit-product="${esc(item.id)}">Editar</button></td></tr>`).join("")) : empty("Agregá el primer producto de Cualitec.");
-  return `${section("Catálogo", `<label class="catalog-search">Buscar por nombre, código de barras o SKU<input id="product-search" autocomplete="off" placeholder="Escribí o escaneá un código"></label><p id="product-search-empty" class="empty" hidden>No hay productos para esa búsqueda.</p>${table}`, '<button id="new-product" class="secondary" type="button">+ Agregar producto</button>')}${section("Agregar o editar producto", form)}`;
+  const stockUnits = state.products.reduce((sum, item) => sum + Number(item.stock || 0), 0);
+  const availableUnits = state.products.reduce((sum, item) => sum + availableQuantity(state, item.id), 0);
+  const toRestock = state.products.filter(item => Number(item.stock || 0) <= Number(item.minStock || 0)).length;
+  const summary = `<div class="stats inventory-stats"><article class="stat-card"><span>Variantes</span><strong>${state.products.length}</strong><small>En el catálogo</small></article><article class="stat-card"><span>Unidades en stock</span><strong>${stockUnits}</strong><small>Existencia física</small></article><article class="stat-card"><span>Unidades disponibles</span><strong>${availableUnits}</strong><small>Descontadas las reservas</small></article><article class="stat-card stat-stock"><span>Para reponer</span><strong>${toRestock}</strong><small>En el mínimo o por debajo</small></article></div>`;
+  const table = state.products.length ? rows(["Producto", "Código de barras", "Stock", "Disponible", "Estado", "Costo prom.", "Precio", ""], state.products.map(item => {
+    const stock = Number(item.stock || 0), available = availableQuantity(state, item.id);
+    const restock = stock <= Number(item.minStock || 0);
+    const status = stock <= 0 ? badge("Sin stock", "stock-empty") : restock ? badge("Reponer", "stock-low") : available <= 0 ? badge("Todo reservado", "stock-reserved") : badge("Disponible", "stock-available");
+    return `<tr data-product-row data-restock="${restock}" data-unavailable="${available <= 0}" data-search="${esc([item.name, item.category, item.variant, item.barcode, item.sku].join(" ").toLowerCase())}"><td><strong>${esc(item.name)}</strong><small>${esc([item.category, item.variant].filter(Boolean).join(" · "))}</small></td><td>${esc(item.barcode || item.sku || "—")}</td><td>${stock}</td><td>${available}</td><td>${status}</td><td>${money(item.averageCost)}</td><td>${money(item.price)}</td><td><div class="row-actions"><button class="text-button" data-edit-product="${esc(item.id)}">Editar</button><button class="text-button" data-restock-product="${esc(item.id)}">Registrar entrada</button></div></td></tr>`;
+  }).join("")) : empty("Agregá el primer producto de Cualitec.");
+  return `${summary}${section("Catálogo", `<p class="form-hint inventory-note">Disponible = stock físico menos unidades reservadas. «Reponer» se basa en el stock mínimo de cada variante.</p><label class="catalog-search">Buscar por nombre, código de barras o SKU<input id="product-search" autocomplete="off" placeholder="Escribí o escaneá un código"></label><div class="inventory-filters" role="group" aria-label="Filtrar productos"><button type="button" class="inventory-filter active" data-inventory-filter="all" aria-pressed="true">Todos</button><button type="button" class="inventory-filter" data-inventory-filter="restock" aria-pressed="false">Para reponer</button><button type="button" class="inventory-filter" data-inventory-filter="unavailable" aria-pressed="false">Sin disponibilidad</button></div><p id="product-search-empty" class="empty" hidden>No hay productos para esa búsqueda o filtro.</p>${table}`, '<button id="new-product" class="secondary" type="button">+ Agregar producto</button>')}${section("Agregar o editar producto", form)}`;
+}
+
+function filterProducts() {
+  const query = document.querySelector("#product-search")?.value.trim().toLowerCase() || "";
+  const filter = document.querySelector("[data-inventory-filter].active")?.dataset.inventoryFilter || "all";
+  const entries = [...document.querySelectorAll("[data-product-row]")];
+  entries.forEach(row => { row.hidden = !row.dataset.search.includes(query) || (filter === "restock" && row.dataset.restock !== "true") || (filter === "unavailable" && row.dataset.unavailable !== "true"); });
+  const message = document.querySelector("#product-search-empty");
+  if (message) message.hidden = !entries.length || entries.some(row => !row.hidden);
 }
 
 function purchases() {
@@ -323,6 +341,21 @@ function addOrderProductByCode() {
 
 document.addEventListener("click", event => {
   const target = event.target.closest("button"); if (!target) return;
+  if (target.dataset.inventoryFilter) {
+    document.querySelectorAll("[data-inventory-filter]").forEach(button => {
+      const active = button === target;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
+    filterProducts();
+  }
+  if (target.dataset.restockProduct) {
+    view = "purchases"; render();
+    const form = document.querySelector("#purchase-form");
+    form.elements.productId.value = target.dataset.restockProduct;
+    form.scrollIntoView({ behavior: "smooth", block: "start" });
+    form.elements.quantity.focus({ preventScroll: true });
+  }
   if (target.id === "sync-status") { view = "data"; render(); if (syncStatus === "remote_available") refreshCloud(); }
   if (target.dataset.view) { view = target.dataset.view; render(); document.querySelector(".sidebar").classList.remove("open"); document.querySelector("#menu").setAttribute("aria-expanded", "false"); if (syncStatus === "remote_available") refreshCloud(); }
   if (target.id === "menu" || target.id === "close-menu") { const open = target.id === "menu" ? document.querySelector(".sidebar").classList.toggle("open") : (document.querySelector(".sidebar").classList.remove("open"), false); document.querySelector("#menu").setAttribute("aria-expanded", String(open)); }
@@ -555,10 +588,7 @@ document.addEventListener("input", event => {
   if (["message-phone", "order-message"].includes(event.target.id)) updateMessageDestination();
   if (event.target.closest(".order-line")) event.target.closest(".order-line").removeAttribute("data-pristine");
   if (event.target.id === "product-search") {
-    const query = event.target.value.trim().toLowerCase();
-    const rows = [...document.querySelectorAll("[data-product-row]")];
-    rows.forEach(row => { row.hidden = !row.dataset.search.includes(query); });
-    document.querySelector("#product-search-empty").hidden = rows.some(row => !row.hidden);
+    filterProducts();
   }
 });
 document.addEventListener("keydown", event => {

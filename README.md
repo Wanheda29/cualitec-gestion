@@ -10,7 +10,7 @@ Panel interno para un emprendimiento que vende tecnología por Instagram, WhatsA
 
 - Resumen con pendientes de hoy: entregas previstas, atrasadas, ventas entregadas con saldo por cobrar y encargos con stock disponible. Cada aviso abre el detalle del pedido y permite ir al registro de cobros. Los encargos se evalúan individualmente contra el stock no reservado; el aviso no reserva unidades.
 
-- Catálogo de variantes (color o capacidad), cada una con código de barras, SKU, precio, costo promedio, stock y mínimo de reposición.
+- Catálogo de variantes (color o capacidad), cada una con código de barras, SKU, precio, costo promedio, stock y mínimo de reposición. Incluye resumen de unidades, filtros de reposición y disponibilidad, y acceso directo para registrar entradas de mercadería.
 - Búsqueda por nombre, código de barras o SKU. En un pedido, escribir o escanear el código agrega la variante; repetirlo aumenta la cantidad. Un lector que funciona como teclado sirve sin cámara.
 - Registro de compras y ajustes de stock con motivo.
 - Registro de movimientos de stock con compras, ajustes y salidas por ventas, filtrable por producto y rango de fechas.
