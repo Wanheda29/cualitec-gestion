@@ -2,6 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { whatsappPhone, whatsappUrl, orderMessage } from "../messages.js";
 
+test("el mensaje informa envío sin cargo cuando Cualitec lo paga", () => {
+  const input = state();
+  Object.assign(input.orders[0], { shippingPayer: "merchant_paid", shippingAmount: 0, shippingCost: 123 });
+  const message = orderMessage(input, "o1");
+  assert.match(message, /El envío lo paga Cualitec, sin cargo para vos/);
+  assert.doesNotMatch(message, /123,00|destinatario|Envío incluido/);
+});
+
 const state = () => ({ products: [{ id: "p1", name: "Auriculares", variant: "Negro" }], purchases: [], sales: [], stockAdjustments: [], orders: [{ id: "o1", customerName: "Ana", contact: "@ana", status: "reserved", deliveryMethod: "dac", deliveryDate: "2026-10-05", trackingCode: "DAC123", shippingPayer: "included_in_sale", shippingAmount: 100, discountType: "percent", discountValue: 10, deposit: 200, lines: [{ productId: "p1", quantity: 2, unitPrice: 1000 }] }], payments: [{ id: "pay1", orderId: "o1", kind: "payment", amount: 300 }, { id: "refund", orderId: "o1", kind: "refund", amount: 50 }] });
 
 test("WhatsApp normaliza celulares locales e internacionales y rechaza contactos ambiguos", () => {

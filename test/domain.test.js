@@ -1,11 +1,65 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { emptyState, normalizeState, findProductByCode, addPurchase, adjustStock, saveOrder, availableQuantity, deliverOrder, recordQuickSale, orderTotal, monthlySummary, paidAmount, recordPayment, stockMovements, paymentMovements } from "../domain.js";
+import { emptyState, normalizeState, findProductByCode, saveProduct, addPurchase, adjustStock, saveOrder, availableQuantity, deliverOrder, recordQuickSale, orderTotal, monthlySummary, paidAmount, recordPayment, stockMovements, paymentMovements } from "../domain.js";
 import { salesReportCsv, paymentReportCsv, salesVisualSummary } from "../reports.js";
 import { dailyPending } from "../domain.js";
 
 const product = { id: "p1", name: "Auriculares", stock: 0, averageCost: 0, price: 1000 };
 const order = (id, status, quantity) => ({ id, customerName: "Ana", contact: "@ana", channel: "Instagram", status, deposit: 0, lines: [{ productId: "p1", quantity, unitPrice: 1000 }] });
+
+test("cargar y corregir el costo sin compra afecta próximas ventas y conserva el historial", () => {
+  const created = saveProduct(structuredClone(emptyState), { ...product, stock: 9, minStock: 0, averageCost: 600 });
+  assert.equal(created.products[0].stock, 0);
+  assert.equal(created.purchases.length, 0);
+  const stocked = adjustStock(created, { id: "stock", productId: "p1", newStock: 2, reason: "Stock inicial" });
+  const first = recordQuickSale(stocked, { order: order("first", "inquiry", 1), saleDate: "2026-10-12" });
+  const updated = saveProduct(first, { ...first.products[0], averageCost: 750 });
+  assert.equal(updated.products[0].stock, 1);
+  assert.equal(updated.sales[0].lines[0].unitCost, 600);
+  assert.equal(updated.purchases.length, 0);
+  const second = recordQuickSale(updated, { order: order("second", "inquiry", 1), saleDate: "2026-10-12" });
+  assert.equal(second.sales[1].lines[0].unitCost, 750);
+  assert.equal(monthlySummary(second, "2026-10").cost, 1350);
+  const purchased = addPurchase(updated, { id: "purchase", productId: "p1", quantity: 1, unitCost: 850 });
+  assert.equal(purchased.products[0].averageCost, 800);
+  assert.equal(saveProduct(updated, { ...updated.products[0], averageCost: 0 }).products[0].averageCost, 0);
+  for (const averageCost of [-1, Infinity, "inválido"]) assert.throws(() => saveProduct(updated, { ...updated.products[0], averageCost }), /costo/);
+  assert.equal(first.products[0].averageCost, 600);
+});
+
+test("Cualitec absorbe el envío sin cobrarlo y lo descuenta de la ganancia", () => {
+  const base = { ...structuredClone(emptyState), products: [{ ...product, stock: 2, averageCost: 600 }] };
+  const draft = { ...order("free-shipping", "reserved", 1), discountType: "percent", discountValue: 10, shippingPayer: "merchant_paid", shippingAmount: 0, shippingCost: 150 };
+  const saved = saveOrder(base, draft);
+  assert.equal(orderTotal(draft), 900);
+  const delivered = deliverOrder(saved, draft.id, "2026-10-12");
+  assert.equal(delivered.sales[0].shippingCost, 150);
+  assert.equal(delivered.sales[0].shippingAmount, 0);
+  assert.equal(delivered.sales[0].shippingPayer, "merchant_paid");
+  const summary = monthlySummary(delivered, "2026-10");
+  assert.equal(summary.revenue - summary.shipping - summary.shippingCost - summary.cost, 150);
+  const csvRows = salesReportCsv(delivered, delivered.sales).trim().split("\r\n").map(row => row.split(";").map(cell => cell.slice(1, -1)));
+  assert.equal(csvRows[1][csvRows[0].indexOf("Envío Cualitec")], "150,00");
+  assert.equal(csvRows[1][csvRows[0].indexOf("Ganancia venta")], "150,00");
+  const paid = recordPayment(delivered, { id: "pay-shipping", orderId: draft.id, amount: 900, kind: "payment", method: "cash", date: "2026-10-12" });
+  assert.equal(orderTotal(paid.orders[0]) - paidAmount(paid, draft.id), 0);
+  assert.throws(() => recordPayment(paid, { id: "extra", orderId: draft.id, amount: 150, kind: "payment", method: "cash", date: "2026-10-12" }), /saldo/);
+  const quick = recordQuickSale(base, { order: { ...draft, id: "quick-shipping", shippingCost: 500 }, saleDate: "2026-10-12", paymentAmount: 900 });
+  const loss = monthlySummary(quick, "2026-10");
+  assert.equal(loss.revenue - loss.shipping - loss.shippingCost - loss.cost, -200);
+  assert.equal(normalizeState(JSON.parse(JSON.stringify(delivered))).sales[0].shippingCost, 150);
+});
+
+test("el costo de envío rechaza importes inválidos y se conserva al editar", () => {
+  const base = { ...structuredClone(emptyState), products: [{ ...product, stock: 2 }] };
+  const draft = { ...order("shipping", "inquiry", 1), shippingPayer: "merchant_paid", shippingCost: 150 };
+  for (const shippingCost of [-1, Infinity, "inválido"]) assert.throws(() => saveOrder(base, { ...draft, shippingCost }), /costo de envío/);
+  assert.throws(() => saveOrder(base, { ...draft, shippingPayer: "recipient_on_delivery" }), /costo de envío/);
+  assert.throws(() => saveOrder(base, { ...draft, shippingAmount: 150 }), /cargo de envío/);
+  const saved = saveOrder(base, draft);
+  const edited = saveOrder(saved, { ...draft, shippingCost: 200 });
+  assert.equal(deliverOrder(edited, draft.id, "2026-10-12").sales[0].shippingCost, 200);
+});
 
 test("los pendientes separan entregas y saldos sin incluir cancelados ni ventas pagadas", () => {
   const state = { ...structuredClone(emptyState), products: [product], orders: [
@@ -62,7 +116,7 @@ test("un pedido por encargo se entrega al ingresar stock y crea una sola venta",
   const delivered = deliverOrder(stocked, "o1", "2026-09-28");
   assert.equal(delivered.products[0].stock, 0);
   assert.equal(delivered.sales.length, 1);
-  assert.deepEqual(monthlySummary(delivered, "2026-09"), { sales: 1, revenue: 1000, shipping: 0, discount: 0, cost: 600 });
+  assert.deepEqual(monthlySummary(delivered, "2026-09"), { sales: 1, revenue: 1000, shipping: 0, shippingCost: 0, discount: 0, cost: 600 });
   assert.throws(() => deliverOrder(delivered, "o1", "2026-09-28"), /nuevamente/);
 });
 
@@ -134,7 +188,7 @@ test("aplica solo el descuento ingresado y conserva importes en la venta", () =>
   assert.equal(delivered.sales[0].shippingAmount, 200);
   assert.equal(delivered.sales[0].total, 2000);
   assert.equal(delivered.sales[0].receiptNumber, "A001");
-  assert.deepEqual(monthlySummary(delivered, "2026-10"), { sales: 1, revenue: 2000, shipping: 200, discount: 200, cost: 1200 });
+  assert.deepEqual(monthlySummary(delivered, "2026-10"), { sales: 1, revenue: 2000, shipping: 200, shippingCost: 0, discount: 200, cost: 1200 });
   assert.throws(() => saveOrder(initial, { ...discounted, discountValue: 101 }), /descuento/);
 });
 

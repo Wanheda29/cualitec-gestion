@@ -52,6 +52,17 @@ export function addPurchase(state, purchase) {
   return { ...state, products: state.products.map(item => item.id === product.id ? { ...item, stock: stock + quantity, averageCost: (stock * oldCost + quantity * unitCost) / (stock + quantity) } : item), purchases: [...state.purchases, { ...purchase, quantity, unitCost }] };
 }
 
+export function saveProduct(state, input) {
+  const previous = state.products.find(item => item.id === input.id);
+  const product = { ...previous, ...input, stock: Number(previous?.stock || 0), averageCost: Number(input.averageCost ?? previous?.averageCost ?? 0) };
+  if (!product.id || !product.name?.trim() || !Number.isFinite(product.price) || product.price < 0 || !Number.isInteger(product.minStock) || product.minStock < 0 || !Number.isFinite(product.averageCost) || product.averageCost < 0) throw new Error("Revisá los datos y el costo del producto.");
+  const otherProducts = state.products.filter(item => item.id !== product.id);
+  if (product.barcode && findProductByCode(otherProducts, product.barcode)) throw new Error("Ese código ya está asignado a otro producto.");
+  if (product.sku && findProductByCode(otherProducts, product.sku)) throw new Error("Ese SKU ya está asignado a otra variante.");
+  if (otherProducts.some(item => item.name.trim().toLowerCase() === product.name.trim().toLowerCase() && (item.variant || "").trim().toLowerCase() === (product.variant || "").trim().toLowerCase())) throw new Error("Ese producto y variante ya existen.");
+  return { ...state, products: previous ? state.products.map(item => item.id === product.id ? product : item) : [...state.products, product] };
+}
+
 export function adjustStock(state, adjustment) {
   const product = state.products.find(item => item.id === adjustment.productId);
   const next = Number(adjustment.newStock);
@@ -73,7 +84,10 @@ export function saveOrder(state, order) {
   if (!Object.hasOwn(orderStatuses, order.status)) throw new Error("El estado del pedido no es válido.");
   const discountType = order.discountType || "none", discountValue = Number(order.discountValue || 0), shippingAmount = Number(order.shippingAmount || 0);
   if (!Object.hasOwn(discountTypes, discountType) || !Number.isFinite(discountValue) || discountValue < 0 || (discountType === "percent" && discountValue > 100) || (discountType === "amount" && discountValue > orderSubtotal(order)) || (discountType === "none" && discountValue !== 0)) throw new Error("Revisá el descuento manual.");
+  const shippingCost = Number(order.shippingCost || 0);
+  if (order.shippingPayer && !["recipient_on_delivery", "included_in_sale", "merchant_paid"].includes(order.shippingPayer)) throw new Error("Revisá quién paga el envío.");
   if (!Number.isFinite(shippingAmount) || shippingAmount < 0 || (order.shippingPayer !== "included_in_sale" && shippingAmount !== 0)) throw new Error("Revisá el cargo de envío.");
+  if (!Number.isFinite(shippingCost) || shippingCost < 0 || (order.shippingPayer !== "merchant_paid" && shippingCost !== 0)) throw new Error("Revisá el costo de envío a cargo de Cualitec.");
   if (!Number.isInteger(Number(order.warrantyDays ?? 30)) || Number(order.warrantyDays ?? 30) < 0) throw new Error("Revisá los días de garantía.");
   const previous = state.orders.find(item => item.id === order.id);
   const paid = paidAmount(state, order.id) - Number(previous?.deposit || 0) + Number(order.deposit || 0);
@@ -116,7 +130,7 @@ export function deliverOrder(state, orderId, date) {
     product.stock -= Number(line.quantity);
   }
   const nextNumber = Math.max(state.sales.length, ...state.sales.map(item => Number(item.receiptNumber?.match(/\d+$/)?.[0] || 0))) + 1;
-  const sale = { id: `sale_${crypto.randomUUID()}`, receiptNumber: `A${String(nextNumber).padStart(3, "0")}`, orderId, customerName: order.customerName, contact: order.contact, channel: order.channel, date, lines: saleLines, subtotal: orderSubtotal(order), discountType: order.discountType || "none", discountValue: Number(order.discountValue || 0), discount: discountAmount(order), shippingAmount: order.shippingPayer === "included_in_sale" ? Number(order.shippingAmount || 0) : 0, warrantyDays: Number(order.warrantyDays ?? 30), total: orderTotal(order) };
+  const sale = { id: `sale_${crypto.randomUUID()}`, receiptNumber: `A${String(nextNumber).padStart(3, "0")}`, orderId, customerName: order.customerName, contact: order.contact, channel: order.channel, date, lines: saleLines, subtotal: orderSubtotal(order), discountType: order.discountType || "none", discountValue: Number(order.discountValue || 0), discount: discountAmount(order), shippingAmount: order.shippingPayer === "included_in_sale" ? Number(order.shippingAmount || 0) : 0, shippingPayer: order.shippingPayer || "recipient_on_delivery", shippingCost: order.shippingPayer === "merchant_paid" ? Number(order.shippingCost || 0) : 0, warrantyDays: Number(order.warrantyDays ?? 30), total: orderTotal(order) };
   return { ...state, products, orders: state.orders.map(item => item.id === orderId ? { ...item, status: "delivered", deliveredAt: date } : item), sales: [...state.sales, sale] };
 }
 
@@ -135,10 +149,11 @@ export function monthlySummary(state, month) {
   return state.sales.filter(sale => sale.date.startsWith(month)).reduce((summary, sale) => {
     summary.sales += 1; summary.revenue += Number(sale.total);
     summary.shipping += Number(sale.shippingAmount || 0);
+    summary.shippingCost += Number(sale.shippingCost || 0);
     summary.discount += Number(sale.discount || 0);
     summary.cost += sale.lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitCost), 0);
     return summary;
-  }, { sales: 0, revenue: 0, shipping: 0, discount: 0, cost: 0 });
+  }, { sales: 0, revenue: 0, shipping: 0, shippingCost: 0, discount: 0, cost: 0 });
 }
 
 export function stockMovements(state) {

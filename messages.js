@@ -1,4 +1,4 @@
-import { orderTotal, orderSubtotal, discountAmount, paidAmount, orderStatuses } from "./domain.js?v=aftersales-20261002";
+import { orderTotal, orderSubtotal, discountAmount, paidAmount, orderStatuses } from "./domain.js?v=shipping-20261012";
 
 export const messageTypes = { detail: "Detalle del pedido", balance: "Recordatorio de saldo", delivery: "Datos de entrega" };
 const money = value => new Intl.NumberFormat("es-UY", { style: "currency", currency: "UYU" }).format(value);
@@ -32,6 +32,7 @@ export function orderMessage(state, orderId, type = "detail") {
   const delivery = [`Entrega: ${order.deliveryMethod === "dac" ? "DAC al interior" : "Montevideo"}`, `${order.status === "delivered" ? "Fecha prevista originalmente" : "Fecha prevista"}: ${displayDate(order.deliveryDate)}`];
   if (order.deliveryMethod === "dac" && order.trackingCode) delivery.push(`Guía DAC: ${order.trackingCode}`);
   if (order.shippingPayer === "recipient_on_delivery") delivery.push("El envío lo paga el destinatario al recibir.");
+  if (order.shippingPayer === "merchant_paid") delivery.push("El envío lo paga Cualitec, sin cargo para vos.");
   if (order.shippingPayer === "included_in_sale") delivery.push(`Envío incluido en el total: ${money(Number(order.shippingAmount || 0))}`);
   if (type === "delivery") {
     if (order.status === "cancelled") throw new Error("El pedido está cancelado.");

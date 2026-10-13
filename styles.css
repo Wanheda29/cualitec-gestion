@@ -150,3 +150,5 @@ td small{line-height:1.5}
 .catalog-preview>.form-hint{margin:6px 0 15px}
 .catalog-preview .form-actions{margin-top:16px}
 .import-error{margin:17px 0 0;padding:12px 14px;border:1px solid #efc6bc;border-radius:9px;background:#fff2ef;color:#923d31;font-size:13px}
+
+.form-grid [data-shipping-cost][hidden],.form-grid [data-shipping-charge][hidden]{display:none}
