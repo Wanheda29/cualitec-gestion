@@ -1,4 +1,4 @@
-export const emptyState = { products: [], purchases: [], orders: [], sales: [], stockAdjustments: [], payments: [], serviceCases: [] };
+export const emptyState = { products: [], purchases: [], orders: [], sales: [], stockAdjustments: [], payments: [], serviceCases: [], deletedSales: [] };
 export const orderStatuses = { inquiry: "Consulta", reserved: "Reservado", requested: "Por encargo", ready: "Listo para entregar", delivered: "Entregado", cancelled: "Cancelado" };
 export const paymentMethods = { transfer: "Transferencia", cash: "Efectivo", card: "Tarjeta", mercadopago: "Mercado Pago", other: "Otro" };
 export const discountTypes = { none: "Sin descuento", amount: "Importe fijo", percent: "Porcentaje" };
@@ -129,7 +129,7 @@ export function deliverOrder(state, orderId, date) {
     saleLines.push({ ...line, productName: `${product.name}${product.variant ? ` · ${product.variant}` : ""}`, unitCost: Number(product.averageCost || 0) });
     product.stock -= Number(line.quantity);
   }
-  const nextNumber = Math.max(state.sales.length, ...state.sales.map(item => Number(item.receiptNumber?.match(/\d+$/)?.[0] || 0))) + 1;
+  const nextNumber = Math.max(state.sales.length, ...[...state.sales, ...(state.deletedSales || []).map(item => item.sale)].map(item => Number(item.receiptNumber?.match(/\d+$/)?.[0] || 0))) + 1;
   const sale = { id: `sale_${crypto.randomUUID()}`, receiptNumber: `A${String(nextNumber).padStart(3, "0")}`, orderId, customerName: order.customerName, contact: order.contact, channel: order.channel, date, lines: saleLines, subtotal: orderSubtotal(order), discountType: order.discountType || "none", discountValue: Number(order.discountValue || 0), discount: discountAmount(order), shippingAmount: order.shippingPayer === "included_in_sale" ? Number(order.shippingAmount || 0) : 0, shippingPayer: order.shippingPayer || "recipient_on_delivery", shippingCost: order.shippingPayer === "merchant_paid" ? Number(order.shippingCost || 0) : 0, warrantyDays: Number(order.warrantyDays ?? 30), total: orderTotal(order) };
   return { ...state, products, orders: state.orders.map(item => item.id === orderId ? { ...item, status: "delivered", deliveredAt: date } : item), sales: [...state.sales, sale] };
 }

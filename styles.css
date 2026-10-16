@@ -152,3 +152,5 @@ td small{line-height:1.5}
 .import-error{margin:17px 0 0;padding:12px 14px;border:1px solid #efc6bc;border-radius:9px;background:#fff2ef;color:#923d31;font-size:13px}
 
 .form-grid [data-shipping-cost][hidden],.form-grid [data-shipping-charge][hidden]{display:none}
+
+.sale-edit-line{display:grid;grid-template-columns:minmax(180px,2fr) repeat(3,minmax(90px,1fr)) auto;gap:10px;align-items:end;border:1px solid var(--line);border-radius:9px;padding:12px;margin-bottom:12px}.sale-edit-line button{padding:12px 0}@media(max-width:850px){.sale-edit-line{grid-template-columns:repeat(2,minmax(0,1fr))}.sale-edit-line label:first-child{grid-column:1/-1}}

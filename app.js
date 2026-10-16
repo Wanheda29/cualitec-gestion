@@ -1,4 +1,5 @@
-import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, findProductByCode, saveProduct, addPurchase, adjustStock, saveOrder, deliverOrder, recordQuickSale, orderTotal, paidAmount, recordPayment, monthlySummary, stockMovements, paymentMovements, dailyPending } from "./domain.js?v=cost-20261012";
+import { editSale, deleteSale, restoreSale } from "./sales-management.js?v=sales-edit-20261016";
+import { emptyState, normalizeState, orderStatuses, paymentMethods, discountTypes, availableQuantity, findProductByCode, saveProduct, addPurchase, adjustStock, saveOrder, deliverOrder, recordQuickSale, orderTotal, paidAmount, recordPayment, monthlySummary, stockMovements, paymentMovements, dailyPending } from "./domain.js?v=sales-edit-20261016";
 import { isCloudConfigured, signIn, signOut, updatePassword, getSession, readCloud, writeCloud, listCloudHistory, readCloudRevision } from "./cloud.js?v=aftersales-20261002";
 import { salesReportCsv, paymentReportCsv, salesVisualSummary } from "./reports.js?v=shipping-20261012";
 import { messageTypes, orderMessage, whatsappPhone, whatsappUrl } from "./messages.js?v=shipping-20261012";
@@ -16,6 +17,8 @@ try { syncMeta = JSON.parse(localStorage.getItem(SYNC_KEY)) || null; }
 catch { syncMeta = null; }
 let view = "dashboard";
 let selectedOrderId = null;
+let editingSaleId = null;
+let deletingSaleId = null;
 let selectedCaseId = null, caseSaleId = null;
 let session = null, cloudRevision = 0, cloudEnabled = false, cloudPending = null;
 let cloudCheck = "";
@@ -208,7 +211,7 @@ function aftersales() {
   const salesTable = state.sales.length ? rows(["Venta / cliente", "Productos", "Plazo registrado", "", ""], [...state.sales].reverse().map(item => {
     const info = warrantyInfo(state, item, date());
     const contact = item.contact || state.orders.find(order => order.id === item.orderId)?.contact || "";
-    return `<tr data-warranty-row data-search="${esc([item.receiptNumber, item.customerName, contact, ...item.lines.map(line => line.productName)].join(" ").toLowerCase())}"><td><strong>${esc(item.receiptNumber || item.id)}</strong><small>${esc(item.customerName)} · ${esc(contact)}<br>Venta: ${esc(item.date)}</small></td><td>${item.lines.map(line => `${esc(line.productName)} × ${esc(line.quantity)}`).join("<br>")}</td><td>${badge(info.status, info.remaining === null ? "neutral" : info.remaining < 0 ? "expired" : "covered")}<small>${info.end ? `${info.days} días · Hasta ${esc(info.end)}` : "Según condiciones registradas"}</small></td><td><button class="text-button" data-start-case="${esc(item.id)}">Registrar caso</button></td><td><button class="text-button" data-receipt="${esc(item.id)}">Comprobante</button></td></tr>`;
+    return `<tr data-warranty-row data-search="${esc([item.receiptNumber, item.customerName, contact, ...item.lines.map(line => line.productName)].join(" ").toLowerCase())}"><td><strong>${esc(item.receiptNumber || item.id)}</strong><small>${esc(item.customerName)} · ${esc(contact)}<br>Venta: ${esc(item.date)}</small></td><td>${item.lines.map(line => `${esc(line.productName)} × ${esc(line.quantity)}`).join("<br>")}</td><td>${badge(info.status, info.remaining === null ? "neutral" : info.remaining < 0 ? "expired" : "covered")}<small>${info.end ? `${info.days} días · Hasta ${esc(info.end)}` : "Según condiciones registradas"}</small></td><td><button class="text-button" data-start-case="${esc(item.id)}">Registrar caso</button></td><td><div class="row-actions"><button class="text-button" data-receipt="${esc(item.id)}">Comprobante</button><button class="text-button" data-edit-sale="${esc(item.id)}">Editar venta</button><button class="text-button" data-delete-sale="${esc(item.id)}">Eliminar venta</button></div></td></tr>`;
   }).join("")) : empty("Las ventas entregadas aparecerán aquí.");
   const form = `<form id="service-case-form" class="form-grid"><input name="id" type="hidden" value="${esc(current?.id || "")}"><label>Venta<select name="saleId" required ${current ? "disabled" : ""}>${state.sales.map(item => option(item.id, `${item.receiptNumber || item.id} · ${item.customerName}`, item.id === sale?.id)).join("")}</select></label><label>Producto de la venta<select name="productId" required ${current ? "disabled" : ""}>${(sale?.lines || []).map(line => option(line.productId, line.productName, line.productId === current?.productId)).join("")}</select></label><label>Tipo<select name="type">${Object.entries(caseTypes).map(([key, label]) => option(key, label, key === (current?.type || "warranty"))).join("")}</select></label><label>Estado<select name="status">${Object.entries(caseStatuses).map(([key, label]) => option(key, label, key === (current?.status || "received"))).join("")}</select></label><label>Fecha de recepción<input name="openedAt" type="date" value="${esc(current?.openedAt || date())}" required></label><label class="wide">Motivo / problema<textarea name="issue" rows="3" required>${esc(current?.issue || "")}</textarea></label><label class="wide">Seguimiento / solución<textarea name="resolution" rows="3">${esc(current?.resolution || "")}</textarea></label><div class="form-actions"><button class="primary" ${sale ? "" : "disabled"}>Guardar caso</button><button class="secondary" id="clear-service-case" type="button">Nuevo caso</button></div></form>`;
   const cases = [...state.serviceCases].reverse();
@@ -229,6 +232,46 @@ function customers() {
 const filteredSales = () => state.sales.filter(item => (!salesFilters.from || item.date >= salesFilters.from) && (!salesFilters.to || item.date <= salesFilters.to) && (!salesFilters.channel || item.channel === salesFilters.channel));
 const filteredPayments = () => paymentMovements(state).filter(item => (!paymentFilters.from || (item.date && item.date >= paymentFilters.from)) && (!paymentFilters.to || (item.date && item.date <= paymentFilters.to)) && (!paymentFilters.method || item.method === paymentFilters.method));
 
+
+function saleEditLine(line = {}) {
+  const product = state.products.find(item => item.id === line.productId) || state.products[0];
+  return `<div class="sale-edit-line"><label>Producto / variante<select name="productId" required>${state.products.map(item => option(item.id, productName(item.id), item.id === (line.productId || product?.id))).join("")}</select></label><label>Cantidad<input name="quantity" type="number" min="1" step="1" value="${esc(line.quantity ?? 1)}" required></label><label>Precio unitario<input name="unitPrice" type="number" min="0" step="0.01" value="${esc(line.unitPrice ?? product?.price ?? 0)}" required></label><label>Costo unitario<input name="unitCost" type="number" min="0" step="0.01" value="${esc(line.unitCost ?? product?.averageCost ?? 0)}" required></label><button type="button" class="text-button" data-remove-sale-line>Quitar</button></div>`;
+}
+
+function saleEditor() {
+  const sale = state.sales.find(item => item.id === editingSaleId);
+  if (!sale) return "";
+  const order = state.orders.find(item => item.id === sale.orderId);
+  const payer = sale.shippingPayer || order?.shippingPayer || "recipient_on_delivery";
+  return section(`Editar venta ${esc(sale.receiptNumber || "")}`, `<form id="sale-edit-form" class="form-grid"><input type="hidden" name="id" value="${esc(sale.id)}"><label>Cliente<input name="customerName" value="${esc(sale.customerName)}" required></label><label>Contacto<input name="contact" value="${esc(sale.contact || order?.contact || "")}" required></label><label>Canal<input name="channel" value="${esc(sale.channel)}" required></label><label>Fecha de venta<input type="date" name="date" value="${esc(sale.date)}" required></label><div class="wide"><div id="sale-edit-lines">${sale.lines.map(saleEditLine).join("")}</div><button id="add-sale-line" type="button" class="secondary">Agregar producto</button></div><label>Descuento manual<select name="discountType">${Object.entries(discountTypes).map(([key, value]) => option(key, value, key === (sale.discountType || "none"))).join("")}</select></label><label>Valor del descuento<input name="discountValue" type="number" min="0" step="0.01" value="${esc(sale.discountValue || 0)}" required></label><label>Envío<select name="shippingPayer">${[["recipient_on_delivery", "Destinatario paga al recibir"], ["included_in_sale", "Cualitec cobra el envío"], ["merchant_paid", "Cualitec paga el envío"]].map(([key, value]) => option(key, value, key === payer)).join("")}</select></label><label data-shipping-charge>Cargo de envío<input name="shippingAmount" type="number" min="0" step="0.01" value="${esc(sale.shippingAmount || 0)}" required></label><label data-shipping-cost hidden>Costo de envío a cargo de Cualitec<input name="shippingCost" type="number" min="0" step="0.01" value="${esc(sale.shippingCost || 0)}" required></label><label>Garantía (días)<input name="warrantyDays" type="number" min="0" step="1" value="${esc(sale.warrantyDays ?? order?.warrantyDays ?? 30)}" required></label><p class="form-hint wide">Los cambios se aplican a esta venta y su pedido. El stock se ajusta según las cantidades. Los cobros se conservan; para reducir el total por debajo de lo cobrado, registrá primero la devolución desde Pedidos.</p><div class="quick-sale-total wide" aria-live="polite"><span>Total <strong id="sale-edit-total"></strong></span><span>Ganancia <strong id="sale-edit-profit"></strong></span><span>Saldo <strong id="sale-edit-balance"></strong></span></div><div class="form-actions"><button class="primary">Guardar cambios de venta</button><button id="cancel-sale-edit" type="button" class="secondary">Cancelar edición</button></div></form>`);
+}
+
+function readSaleForm(form) {
+  const data = Object.fromEntries(new FormData(form));
+  return { ...data, lines: [...form.querySelectorAll(".sale-edit-line")].map(row => ({ productId: row.querySelector('[name="productId"]').value, quantity: Number(row.querySelector('[name="quantity"]').value), unitPrice: Number(row.querySelector('[name="unitPrice"]').value), unitCost: Number(row.querySelector('[name="unitCost"]').value) })) };
+}
+
+function syncSaleEditTotal() {
+  const form = document.querySelector("#sale-edit-form");
+  if (!form) return;
+  const data = readSaleForm(form), sale = state.sales.find(item => item.id === data.id);
+  const total = orderTotal(data), cost = data.lines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0);
+  document.querySelector("#sale-edit-total").textContent = money(total);
+  document.querySelector("#sale-edit-profit").textContent = money(total - Number(data.shippingAmount || 0) - Number(data.shippingCost || 0) - cost);
+  document.querySelector("#sale-edit-balance").textContent = money(total - paidAmount(state, sale.orderId));
+}
+
+function saleDeleteConfirmation() {
+  const sale = state.sales.find(item => item.id === deletingSaleId);
+  if (!sale) return "";
+  return section(`Eliminar venta ${esc(sale.receiptNumber)}`, `<p>Cliente: <strong>${esc(sale.customerName)}</strong> · Total: <strong>${money(sale.total)}</strong>.</p><p>Se devolverán al stock ${sale.lines.map(line => `${esc(line.quantity)} × ${esc(line.productName)}`).join(", ")} y se cancelará su pedido. La venta dejará de sumar en los informes. Podrás recuperarla desde Ventas eliminadas.</p><p class="form-hint">Si tiene cobros pendientes de devolver o casos de posventa, la eliminación se bloqueará.</p><div class="form-actions"><button class="primary" data-confirm-delete-sale="${esc(sale.id)}">Confirmar eliminación</button><button class="secondary" id="cancel-sale-delete">Cancelar eliminación</button></div>`);
+}
+
+function deletedSalesPanel() {
+  const entries = state.deletedSales || [];
+  return entries.length ? section("Ventas eliminadas", `<p class="form-hint">Las unidades se devolvieron al stock. Recuperar una venta vuelve a descontarlas y restablece su pedido y comprobante.</p>${rows(["Venta", "Cliente", "Total", ""], entries.map(item => `<tr><td>${esc(item.sale.receiptNumber)}</td><td>${esc(item.sale.customerName)}</td><td>${money(item.sale.total)}</td><td><button class="text-button" data-restore-sale="${esc(item.id)}">Recuperar venta</button></td></tr>`).join(""))}`) : "";
+}
+
 function sales() {
   const filtered = filteredSales();
   const totals = filtered.reduce((result, sale) => {
@@ -248,7 +291,7 @@ function sales() {
     }
   }
   const filterForm = `<form id="sales-filter-form" class="form-grid"><label>Desde<input name="from" type="date" value="${esc(salesFilters.from)}"></label><label>Hasta<input name="to" type="date" value="${esc(salesFilters.to)}"></label><label>Canal<select name="channel">${option("", "Todos los canales", !salesFilters.channel)}${[...new Set(state.sales.map(item => item.channel))].map(item => option(item, item, item === salesFilters.channel)).join("")}</select></label><div class="form-actions"><button class="primary">Aplicar filtros</button><button id="clear-sales-filters" type="button" class="secondary">Limpiar</button><button id="export-sales" type="button" class="secondary" ${filtered.length ? "" : "disabled"}>Descargar CSV</button></div></form>`;
-  const table = filtered.length ? rows(["Fecha", "Venta", "Cliente", "Canal", "Productos", "Descuento", "Envío cobrado", "Envío Cualitec", "Ganancia", "Total", "Saldo", ""], [...filtered].reverse().map(item => `<tr><td>${esc(item.date)}</td><td>${esc(item.receiptNumber || `A${String(state.sales.indexOf(item) + 1).padStart(3, "0")}`)}</td><td>${esc(item.customerName)}</td><td>${esc(item.channel)}</td><td>${item.lines.map(line => `${esc(line.productName)} × ${line.quantity}`).join("<br>")}</td><td>${money(item.discount || 0)}</td><td>${money(item.shippingAmount || 0)}</td><td>${money(item.shippingCost || 0)}</td><td>${money(item.total - Number(item.shippingAmount || 0) - Number(item.shippingCost || 0) - item.lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitCost), 0))}</td><td>${money(item.total)}</td><td>${money(item.total - paidAmount(state, item.orderId))}</td><td><button class="text-button" data-receipt="${esc(item.id)}">Comprobante</button></td></tr>`).join("")) : empty("No hay ventas para los filtros elegidos.");
+  const table = filtered.length ? rows(["Fecha", "Venta", "Cliente", "Canal", "Productos", "Descuento", "Envío cobrado", "Envío Cualitec", "Ganancia", "Total", "Saldo", ""], [...filtered].reverse().map(item => `<tr><td>${esc(item.date)}</td><td>${esc(item.receiptNumber || `A${String(state.sales.indexOf(item) + 1).padStart(3, "0")}`)}</td><td>${esc(item.customerName)}</td><td>${esc(item.channel)}</td><td>${item.lines.map(line => `${esc(line.productName)} × ${line.quantity}`).join("<br>")}</td><td>${money(item.discount || 0)}</td><td>${money(item.shippingAmount || 0)}</td><td>${money(item.shippingCost || 0)}</td><td>${money(item.total - Number(item.shippingAmount || 0) - Number(item.shippingCost || 0) - item.lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitCost), 0))}</td><td>${money(item.total)}</td><td>${money(item.total - paidAmount(state, item.orderId))}</td><td><div class="row-actions"><button class="text-button" data-receipt="${esc(item.id)}">Comprobante</button><button class="text-button" data-edit-sale="${esc(item.id)}">Editar venta</button><button class="text-button" data-delete-sale="${esc(item.id)}">Eliminar venta</button></div></td></tr>`).join("")) : empty("No hay ventas para los filtros elegidos.");
   const productTable = products.size ? rows(["Producto", "Unidades", "Venta neta", "Costo", "Margen"], [...products.values()].sort((a, b) => b.revenue - a.revenue).map(item => `<tr><td>${esc(item.name)}</td><td>${item.quantity}</td><td>${money(item.revenue)}</td><td>${money(item.cost)}</td><td>${money(item.revenue - item.cost)}</td></tr>`).join("")) : empty("Sin productos vendidos en este período.");
   const payments = filteredPayments();
   const charged = payments.filter(item => item.kind === "payment").reduce((sum, item) => sum + item.amount, 0);
@@ -258,7 +301,7 @@ function sales() {
   const visuals = salesVisualSummary(filtered);
   const charts = filtered.length ? `<div class="grid two sales-charts">${section("Evolución mensual", `<p class="form-hint">Últimos seis meses con ventas dentro de los filtros elegidos.</p>${reportBars(visuals.months, "months")}`)}${section("Ventas por canal", `<p class="form-hint">Participación de cada canal en el importe vendido del período.</p>${reportBars(visuals.channels, "channels")}`)}</div>` : "";
   const paymentReport = `${paymentFilterForm}<p class="form-hint">Este informe usa la fecha del cobro o devolución; puede diferir de la fecha de venta. Las señas antiguas sin fecha quedan fuera al filtrar por período.</p><div class="stats payment-stats"><article><span>Cobrado</span><strong>${money(charged)}</strong></article><article><span>Devuelto</span><strong>${money(refunded)}</strong></article><article><span>Ingreso neto</span><strong>${money(charged - refunded)}</strong></article></div>${paymentTable}`;
-  return `${section("Filtrar ventas", filterForm)}<div class="stats"><article><span>Ventas</span><strong>${filtered.length}</strong><small>Total ${money(totals.revenue)}</small></article><article><span>Ganancia de ventas</span><strong>${money(totals.revenue - totals.shipping - totals.shippingCost - totals.cost)}</strong><small>Descontando mercadería y envíos a cargo de Cualitec</small></article><article><span>Descuentos</span><strong>${money(totals.discount)}</strong><small>Aplicados manualmente</small></article><article><span>Por cobrar</span><strong>${money(totals.outstanding)}</strong><small>De las ventas filtradas</small></article></div>${charts}${section("Ventas realizadas", table)}${section("Productos vendidos", productTable)}${section("Cobros y devoluciones por fecha", paymentReport)}`;
+  return `${saleDeleteConfirmation()}${saleEditor()}${section("Filtrar ventas", filterForm)}<div class="stats"><article><span>Ventas</span><strong>${filtered.length}</strong><small>Total ${money(totals.revenue)}</small></article><article><span>Ganancia de ventas</span><strong>${money(totals.revenue - totals.shipping - totals.shippingCost - totals.cost)}</strong><small>Descontando mercadería y envíos a cargo de Cualitec</small></article><article><span>Descuentos</span><strong>${money(totals.discount)}</strong><small>Aplicados manualmente</small></article><article><span>Por cobrar</span><strong>${money(totals.outstanding)}</strong><small>De las ventas filtradas</small></article></div>${charts}${section("Ventas realizadas", table)}${section("Productos vendidos", productTable)}${section("Cobros y devoluciones por fecha", paymentReport)}${deletedSalesPanel()}`;
 }
 
 function dataView() {
@@ -391,6 +434,7 @@ function render() {
     document.querySelector("#payment-form").elements.orderId.value = selectedOrderId;
   }
   if (view === "orders") syncOrderControls(document.querySelector("#order-form"));
+  if (view === "sales" && editingSaleId) { syncOrderControls(document.querySelector("#sale-edit-form")); syncSaleEditTotal(); }
   if (view === "quick-sale") { syncOrderControls(document.querySelector("#quick-sale-form")); syncQuickSaleTotal(); }
   setSyncStatus(syncStatus);
 }
@@ -534,6 +578,31 @@ document.addEventListener("click", event => {
     link.href = url; link.download = `cualitec-cobros-${paymentFilters.from || "inicio"}-${paymentFilters.to || "hoy"}.csv`;
     link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+  if (target.dataset.editSale) {
+    if (draftDirty && !confirm("Hay cambios sin guardar. ¿Descartarlos para editar esta venta?")) return;
+    deletingSaleId = null; editingSaleId = target.dataset.editSale; draftDirty = false; render();
+    document.querySelector("#sale-edit-form").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  if (target.id === "cancel-sale-edit") {
+    if (draftDirty && !confirm("¿Descartar los cambios de esta venta?")) return;
+    editingSaleId = null; draftDirty = false; render();
+  }
+  if (target.id === "add-sale-line") { document.querySelector("#sale-edit-lines").insertAdjacentHTML("beforeend", saleEditLine()); draftDirty = true; syncSaleEditTotal(); }
+  if (target.hasAttribute("data-remove-sale-line")) {
+    const container = document.querySelector("#sale-edit-lines");
+    if (container.children.length > 1) { target.closest(".sale-edit-line").remove(); draftDirty = true; syncSaleEditTotal(); } else toast("Se necesita al menos un producto.");
+  }
+  if (target.dataset.deleteSale) {
+    if (draftDirty) { toast("Guardá o cancelá la edición antes de eliminar una venta."); return; }
+    deletingSaleId = target.dataset.deleteSale; render(); document.querySelector("#app").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  if (target.id === "cancel-sale-delete") { deletingSaleId = null; render(); }
+  if (target.dataset.confirmDeleteSale) {
+    try { const next = deleteSale(state, target.dataset.confirmDeleteSale); deletingSaleId = null; editingSaleId = null; draftDirty = false; persist(next); toast("Venta eliminada. Podés recuperarla al final de Ventas."); } catch (error) { toast(error.message); }
+  }
+  if (target.dataset.restoreSale) {
+    try { const next = restoreSale(state, target.dataset.restoreSale); editingSaleId = null; draftDirty = false; persist(next); toast("Venta recuperada."); } catch (error) { toast(error.message); }
+  }
   if (target.dataset.receipt) window.open(`receipt.html?sale=${encodeURIComponent(target.dataset.receipt)}`, "_blank", "noopener");
   if (target.dataset.deliver) {
     try { const next = deliverOrder(state, target.dataset.deliver, date()); persist(next); window.open(`receipt.html?sale=${encodeURIComponent(next.sales.at(-1).id)}`, "_blank", "noopener"); toast("Venta registrada. El comprobante está disponible en Ventas."); } catch (error) { toast(error.message); }
@@ -592,6 +661,11 @@ document.addEventListener("click", event => {
 });
 
 document.addEventListener("submit", async event => {
+  if (event.target.getAttribute("id") === "sale-edit-form") {
+    event.preventDefault();
+    try { const data = readSaleForm(event.target); const next = editSale(state, data.id, data); editingSaleId = null; draftDirty = false; persist(next); toast("Venta actualizada. El comprobante y la ganancia ya reflejan los cambios."); } catch (error) { toast(error.message); }
+    return;
+  }
   if (event.target.getAttribute("id") === "service-case-form") {
     event.preventDefault();
     const form = event.target, data = Object.fromEntries(new FormData(form));
@@ -661,7 +735,7 @@ document.addEventListener("submit", async event => {
 });
 
 document.addEventListener("change", async event => {
-  if (event.target.closest("#product-form,#purchase-form,#adjust-form,#order-form,#payment-form,#quick-sale-form,#service-case-form,#password-form,#login-form") || ["message-kind", "message-phone", "order-message"].includes(event.target.id)) draftDirty = true;
+  if (event.target.closest("#product-form,#purchase-form,#adjust-form,#order-form,#payment-form,#quick-sale-form,#sale-edit-form,#service-case-form,#password-form,#login-form") || ["message-kind", "message-phone", "order-message"].includes(event.target.id)) draftDirty = true;
   if (event.target.name === "saleId" && event.target.closest("#service-case-form")) {
     const sale = state.sales.find(item => item.id === event.target.value);
     event.target.form.elements.productId.innerHTML = (sale?.lines || []).map(line => option(line.productId, line.productName)).join("");
@@ -671,7 +745,8 @@ document.addEventListener("change", async event => {
     catch (error) { toast(error.message); }
   }
   if (event.target.closest(".order-line")) event.target.closest(".order-line").removeAttribute("data-pristine");
-  if (["discountType", "shippingPayer"].includes(event.target.name) && event.target.closest("#order-form,#quick-sale-form")) syncOrderControls(event.target.form, true);
+  if (["discountType", "shippingPayer"].includes(event.target.name) && event.target.closest("#order-form,#quick-sale-form,#sale-edit-form")) syncOrderControls(event.target.form, true);
+  if (event.target.closest("#sale-edit-form")) syncSaleEditTotal();
   if (event.target.closest("#quick-sale-form")) syncQuickSaleTotal();
   if (event.target.id === "catalog-csv") {
     const file = event.target.files?.[0];
@@ -698,13 +773,20 @@ document.addEventListener("change", async event => {
       if (confirm("Este respaldo reemplazará todos los datos actuales de Cualitec en este navegador. ¿Continuar?")) { persist(restored); toast("Respaldo restaurado."); }
     } catch (error) { toast(error.message); }
   }
+  if (event.target.name === "productId" && event.target.closest(".sale-edit-line")) {
+    const product = state.products.find(item => item.id === event.target.value), row = event.target.closest(".sale-edit-line");
+    row.querySelector('[name="unitPrice"]').value = product.price;
+    row.querySelector('[name="unitCost"]').value = product.averageCost || 0;
+    syncSaleEditTotal();
+  }
   if (event.target.name === "productId" && event.target.closest(".order-line")) {
     const product = state.products.find(item => item.id === event.target.value);
     if (product) event.target.closest(".order-line").querySelector('[name="unitPrice"]').value = product.price;
   }
 });
 document.addEventListener("input", event => {
-  if (event.target.closest("#product-form,#purchase-form,#adjust-form,#order-form,#payment-form,#quick-sale-form,#service-case-form,#password-form,#login-form") || ["message-phone", "order-message"].includes(event.target.id)) draftDirty = true;
+  if (event.target.closest("#product-form,#purchase-form,#adjust-form,#order-form,#payment-form,#quick-sale-form,#sale-edit-form,#service-case-form,#password-form,#login-form") || ["message-phone", "order-message"].includes(event.target.id)) draftDirty = true;
+  if (event.target.closest("#sale-edit-form")) syncSaleEditTotal();
   if (event.target.closest("#quick-sale-form")) syncQuickSaleTotal();
   if (event.target.id === "warranty-search") {
     const query = event.target.value.trim().toLowerCase(), entries = [...document.querySelectorAll("[data-warranty-row]")];

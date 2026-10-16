@@ -4,6 +4,9 @@ Panel interno para un emprendimiento que vende tecnología por Instagram, WhatsA
 
 ## Funciones actuales
 
+- Edición de ventas desde Ventas: cliente, contacto, fecha, productos, cantidades, precios, costos, descuentos, envío y garantía. Actualiza el pedido, el stock por diferencia, la ganancia y el comprobante. Conserva los cobros y bloquea reducciones del total por debajo de lo cobrado hasta registrar una devolución.
+- Eliminación recuperable de ventas: devuelve las unidades al stock, cancela el pedido y excluye la venta de los informes. Requiere devolver primero los cobros y no admite ventas con casos de posventa. Las ventas eliminadas se conservan en los respaldos y la sincronización, se recuperan desde Ventas eliminadas si hay stock disponible y sus números de comprobante no se reutilizan.
+
 - Garantías y posventa: búsqueda de ventas por comprobante, cliente, contacto o producto; consulta del plazo registrado desde la fecha de venta; casos de reclamo, cambio o reparación por producto con estados, seguimiento e historial. Los casos se incluyen en respaldos y sincronización. Los ajustes de stock y devoluciones de dinero se registran por separado.
 
 - Mensajes preparados por pedido: detalle, saldo pendiente y datos de entrega con guía DAC cuando esté cargada. Se pueden revisar, editar y copiar para cualquier canal, o abrir WhatsApp con un celular uruguayo o un número internacional. El envío se realiza manualmente en WhatsApp.
